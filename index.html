@@ -3,12 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Muse 2 Stream</title>
+  <title>Rhythms of the Brain</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header>
-    <h1>Muse 2 Stream</h1>
     <button id="connect">Connect</button>
     <label>
       Scale
@@ -30,15 +29,23 @@
 
   <main>
     <canvas id="eeg"></canvas>
-    <table id="stats">
-      <thead><tr><th>Channel</th><th>Std dev (µV)</th><th>Packets</th></tr></thead>
-      <tbody></tbody>
-    </table>
-    <dl id="telemetry">
-      <dt>Battery</dt><dd id="battery">–</dd>
-      <dt>Accel (g)</dt><dd id="accel">–</dd>
-      <dt>Gyro (°/s)</dt><dd id="gyro">–</dd>
-    </dl>
+    <figure id="montage">
+      <svg viewBox="-125 -125 250 250" role="img"
+           aria-label="10-20 electrode chart, top view, nose up, with the measured electrodes highlighted"></svg>
+    </figure>
+    <div class="panels">
+      <div class="readouts">
+        <table id="stats">
+          <thead><tr><th>Channel</th><th>Std dev (µV)</th><th>Packets</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <dl id="telemetry">
+          <dt>Battery</dt><dd id="battery">–</dd>
+          <dt>Accel (g)</dt><dd id="accel">–</dd>
+          <dt>Gyro (°/s)</dt><dd id="gyro">–</dd>
+        </dl>
+      </div>
+    </div>
   </main>
 
   <script type="module" src="app.js"></script>

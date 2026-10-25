@@ -1,8 +1,8 @@
 :root {
-  --bg: #111418;
-  --fg: #e6e8eb;
-  --muted: #8a9099;
-  --grid: #262b33;
+  --bg: #141414;
+  --fg: #e8e8e8;
+  --muted: #8f8f8f;
+  --grid: #2a2a2a;
   --accent: #4f9cf9;
   color-scheme: dark;
 }
@@ -32,7 +32,7 @@ button, select {
   font: inherit;
   color: var(--fg);
   background: var(--grid);
-  border: 1px solid #3a414c;
+  border: 1px solid #424242;
   border-radius: 6px;
   padding: 6px 12px;
   cursor: pointer;
@@ -49,12 +49,47 @@ canvas {
   width: 100%;
   height: 60vh;
   min-height: 320px;
-  background: #0b0d10;
+  background: #0d0d0d;
   border-radius: 8px;
 }
 
+/* Plot on the left, electrode chart on the right at the plot's height. */
+main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 16px;
+}
+
+.panels { grid-column: 1 / -1; }
+
+.readouts {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+#montage {
+  margin: 0;
+  width: clamp(320px, 60vh, 45vw);
+  align-self: center;
+}
+
+#montage svg { display: block; width: 100%; height: auto; }
+
+@media (max-width: 720px) {
+  main { grid-template-columns: minmax(0, 1fr); }
+  #montage { width: 100%; max-width: 420px; justify-self: center; }
+}
+
+#montage .head { fill: none; stroke: #424242; stroke-width: 1.5; }
+#montage .ring { fill: none; stroke: var(--grid); stroke-dasharray: 3 3; }
+#montage .site { fill: #1e1e1e; stroke: #424242; }
+#montage .site-label { fill: var(--muted); font-size: 6.5px; }
+#montage .ref { fill: #1e1e1e; stroke: var(--fg); stroke-dasharray: 2 1.5; }
+#montage .muse-label { fill: #0d0d0d; font-size: 6.5px; font-weight: 700; }
+
 #stats {
-  margin-top: 12px;
   border-collapse: collapse;
   font-variant-numeric: tabular-nums;
 }

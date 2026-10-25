@@ -22,6 +22,46 @@ const statCells = EEG_CHANNELS.map((name, ch) => {
   return { std: row.insertCell(), packets: row.insertCell() };
 });
 
+// 10-20 sites as [degrees down from the vertex, degrees clockwise from the nose].
+// Inner sites (F3, P3, ...) are approximate; the rest sit on the 10% grid.
+const SITES = {
+  Fpz: [72, 0], Fp1: [72, -18], Fp2: [72, 18], AF7: [72, -36], AF8: [72, 36],
+  F7: [72, -54], F8: [72, 54], T7: [72, -90], T8: [72, 90], P7: [72, -126], P8: [72, 126],
+  O1: [72, -162], O2: [72, 162], Oz: [72, 180],
+  F3: [46, -39], F4: [46, 39], C3: [36, -90], C4: [36, 90], P3: [46, -141], P4: [46, 141],
+  Fz: [36, 0], Cz: [0, 0], Pz: [36, 180],
+  TP9: [90, -108], TP10: [90, 108],
+};
+const REFERENCE = 'Fpz';
+
+function drawMontage(svg) {
+  const R = 100; // radius of the 90-degree (ear level) circle
+  const project = ([theta, phi]) => {
+    const r = (theta / 90) * R;
+    const a = (phi * Math.PI) / 180;
+    return [r * Math.sin(a), -r * Math.cos(a)];
+  };
+  let html = `
+    <path class="head" d="M -10 -99.5 L 0 -114 L 10 -99.5" />
+    <ellipse class="head" cx="-104" cy="0" rx="5" ry="13" />
+    <ellipse class="head" cx="104" cy="0" rx="5" ry="13" />
+    <circle class="head" r="${R}" />
+    <circle class="ring" r="${0.8 * R}" />`;
+  for (const [name, pos] of Object.entries(SITES)) {
+    const [x, y] = project(pos);
+    const ch = EEG_CHANNELS.indexOf(name);
+    if (ch >= 0) {
+      html += `<circle r="10" cx="${x}" cy="${y}" fill="${COLORS[ch]}" />
+        <text class="muse-label" x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central">${name}</text>`;
+    } else {
+      html += `<circle class="${name === REFERENCE ? 'ref' : 'site'}" r="8" cx="${x}" cy="${y}" />
+        <text class="site-label" x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central">${name}</text>`;
+    }
+  }
+  svg.innerHTML = html;
+}
+drawMontage(document.querySelector('#montage svg'));
+
 let muse = null;
 
 if (!navigator.bluetooth) {
@@ -97,7 +137,7 @@ function draw() {
   ctx.clearRect(0, 0, w, h);
 
   // Vertical grid line every second.
-  ctx.strokeStyle = '#262b33';
+  ctx.strokeStyle = '#2a2a2a';
   ctx.lineWidth = 1;
   ctx.beginPath();
   for (let s = 1; s < WINDOW_SECONDS; s++) {
@@ -119,7 +159,7 @@ function draw() {
     for (let i = 0; i < WINDOW; i++) variance += (buf[i] - mean) ** 2;
     const std = Math.sqrt(variance / WINDOW);
 
-    ctx.strokeStyle = '#262b33';
+    ctx.strokeStyle = '#2a2a2a';
     ctx.beginPath();
     ctx.moveTo(0, Math.round(mid) + 0.5);
     ctx.lineTo(w, Math.round(mid) + 0.5);
