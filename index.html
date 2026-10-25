@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Muse 2 Stream</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Muse 2 Stream</h1>
+    <button id="connect">Connect</button>
+    <label>
+      Scale
+      <select id="scale">
+        <option value="50">±50 µV</option>
+        <option value="100" selected>±100 µV</option>
+        <option value="200">±200 µV</option>
+        <option value="500">±500 µV</option>
+        <option value="1000">±1000 µV</option>
+      </select>
+    </label>
+    <span id="status">Disconnected</span>
+  </header>
+
+  <p id="unsupported" hidden>
+    Web Bluetooth isn't available here. Use Chrome or Edge, and serve this page from
+    <code>localhost</code> or HTTPS.
+  </p>
+
+  <main>
+    <canvas id="eeg"></canvas>
+    <table id="stats">
+      <thead><tr><th>Channel</th><th>Std dev (µV)</th><th>Packets</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <dl id="telemetry">
+      <dt>Battery</dt><dd id="battery">–</dd>
+      <dt>Accel (g)</dt><dd id="accel">–</dd>
+      <dt>Gyro (°/s)</dt><dd id="gyro">–</dd>
+    </dl>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
