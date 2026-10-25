@@ -19,6 +19,8 @@
         <option value="1000">±1000 µV</option>
       </select>
     </label>
+    <label><input type="checkbox" id="highpass" checked> 1 Hz high-pass</label>
+    <label><input type="checkbox" id="notch" checked> 60 Hz notch</label>
     <span id="status">Disconnected</span>
   </header>
 
@@ -36,7 +38,7 @@
     <div class="panels">
       <div class="readouts">
         <table id="stats">
-          <thead><tr><th>Channel</th><th>Std dev (µV)</th><th>Packets</th></tr></thead>
+          <thead><tr><th>Channel</th><th>Contact</th><th>Std dev (µV)</th><th>Packets</th></tr></thead>
           <tbody></tbody>
         </table>
         <dl id="telemetry">
@@ -45,6 +47,10 @@
           <dt>Gyro (°/s)</dt><dd id="gyro">–</dd>
         </dl>
       </div>
+      <section id="bands">
+        <h2>Band power (dB re 1 µV²)</h2>
+        <canvas id="band-chart"></canvas>
+      </section>
     </div>
   </main>
 

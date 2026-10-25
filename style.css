@@ -3,7 +3,9 @@
   --fg: #e8e8e8;
   --muted: #8f8f8f;
   --grid: #2a2a2a;
-  --accent: #4f9cf9;
+  --accent: #437bbd;
+  --warn: #b77f4d;
+  --bad: #b8555b;
   color-scheme: dark;
 }
 
@@ -42,9 +44,15 @@ button:hover { border-color: var(--accent); }
 
 #status { color: var(--muted); }
 
-#unsupported { color: #f0a35e; }
+#unsupported { color: var(--warn); }
 
-canvas {
+header input[type='checkbox'] { accent-color: var(--accent); }
+
+.q-good { color: var(--fg); }
+.q-fair { color: var(--warn); }
+.q-poor { color: var(--bad); }
+
+#eeg {
   display: block;
   width: 100%;
   height: 60vh;
@@ -53,14 +61,35 @@ canvas {
   border-radius: 8px;
 }
 
-/* Plot on the left, electrode chart on the right at the plot's height. */
+/* Plot with the electrode chart to its right; readouts and band chart in a row below the plot. */
 main {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px 16px;
 }
 
-.panels { grid-column: 1 / -1; }
+.panels {
+  grid-column: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16px 48px;
+}
+
+.panels #bands { flex: 1 1 360px; min-width: 0; }
+
+#bands h2 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+#band-chart {
+  display: block;
+  width: 100%;
+  height: 220px;
+}
 
 .readouts {
   display: flex;

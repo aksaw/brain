@@ -17,4 +17,6 @@ Then open http://localhost:8000, turn on the headband, and click **Connect**.
 ## Files
 
 - `muse.js` – BLE client: GATT UUIDs, command framing, packet decoding.
-- `app.js` – ring buffers and canvas rendering (5 s window, DC offset removed per channel).
+- `app.js` – ring buffers, contact quality, and canvas rendering (5 s window, DC offset removed per channel).
+- `filters.js` – streaming high-pass and mains notch filters applied to incoming samples.
+- `bands.js` – FFT band power (delta to gamma) for the band chart.
