@@ -20,3 +20,5 @@ Then open http://localhost:8000, turn on the headband, and click **Connect**.
 - `app.js` – ring buffers, contact quality, and canvas rendering (5 s window, DC offset removed per channel).
 - `filters.js` – streaming high-pass and mains notch filters applied to incoming samples.
 - `bands.js` – FFT band power (delta to gamma) for the band chart.
+- `artifacts.js` – detection of blinks, sideways eye movements, muscle, head movement and
+  electrode pops. Drives the shading on the traces, the pausing of band powers, and the eyes.

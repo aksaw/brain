@@ -1,12 +1,15 @@
 import { Muse, EEG_CHANNELS, EEG_SAMPLE_RATE, EEG_SAMPLES_PER_PACKET } from './muse.js';
 import { BANDS, bandPowers } from './bands.js';
 import { highpass, notch } from './filters.js';
+import { ArtifactDetector } from './artifacts.js';
 
 const WINDOW_SECONDS = 5;
 const WINDOW = WINDOW_SECONDS * EEG_SAMPLE_RATE;
 const COLORS = ['#437bbd', '#48886c', '#b28942', '#b8555b'];
 
-const FFT_SIZE = 512; // 2 s at 256 Hz, 0.5 Hz resolution
+const FFT_SIZE = 256; // 1 s segments, 1 Hz resolution
+const FFT_HOP = 64; // segments overlap by 75%
+const BAND_HISTORY = 3 * EEG_SAMPLE_RATE; // look for clean segments in the last 3 s
 const BAND_UPDATE_MS = 250;
 const BAND_SMOOTHING = 0.3; // weight of each new estimate; ~1 s time constant
 const DB_MIN = -10;
@@ -28,7 +31,17 @@ const QUALITY_LEVELS = [
 const NO_SIGNAL = { label: 'No signal', className: 'q-poor', opacity: 0.15 };
 const NO_DATA = { label: '–', className: '', opacity: 1 };
 
+const MARK_LABELS = {
+  blink: 'blink',
+  eye: 'eye movement',
+  muscle: 'muscle',
+  movement: 'movement',
+  pop: 'pop',
+};
+
 const connectButton = document.getElementById('connect');
+const recordButton = document.getElementById('record');
+const calibrateButton = document.getElementById('calibrate');
 const statusEl = document.getElementById('status');
 const scaleSelect = document.getElementById('scale');
 const highpassCheckbox = document.getElementById('highpass');
@@ -46,8 +59,9 @@ const packetCounts = EEG_CHANNELS.map(() => 0);
 const lastPacketAt = EEG_CHANNELS.map(() => -Infinity);
 const railedAt = EEG_CHANNELS.map(() => -Infinity);
 
-// Smoothed power per channel per band, in µV².
+// Smoothed power per channel per band, in µV², and whether it's paused for an artifact.
 const bandPower = EEG_CHANNELS.map(() => BANDS.map(() => 0));
+const bandHeld = EEG_CHANNELS.map(() => false);
 
 // One chain of filters per channel; rebuilt (with fresh state) when the settings change.
 function makeFilterChains() {
@@ -114,6 +128,42 @@ const montageSites = EEG_CHANNELS.map((_, ch) =>
 );
 
 let muse = null;
+let artifacts = null;
+
+const eyes = document.querySelectorAll('#eyes .eye');
+const gazeGroups = document.querySelectorAll('#eyes .gaze');
+const GAZE_SHIFT = 13; // SVG units the irises move sideways
+const GAZE_RETURN_MS = 2500; // drift back to centre if no glance back is seen
+
+// -1 left, 0 centre, 1 right. A glance moves one step; the eyes act like a mirror.
+let gaze = 0;
+let gazeTimer = null;
+
+function setGaze(position) {
+  gaze = position;
+  for (const g of gazeGroups) g.style.transform = `translateX(${gaze * GAZE_SHIFT}px)`;
+}
+
+function lookTowards(direction) {
+  setGaze(Math.max(-1, Math.min(1, gaze + (direction === 'left' ? -1 : 1))));
+  clearTimeout(gazeTimer);
+  gazeTimer = setTimeout(() => setGaze(0), GAZE_RETURN_MS);
+}
+
+// Squash the eyes shut and open again; each call starts a fresh animation.
+function blinkEyes() {
+  for (const eye of eyes) {
+    eye.animate(
+      [
+        { transform: 'scaleY(1)' },
+        { transform: 'scaleY(0.06)', offset: 0.4 },
+        { transform: 'scaleY(0.06)', offset: 0.6 },
+        { transform: 'scaleY(1)' },
+      ],
+      { duration: 220, easing: 'ease-in-out' },
+    );
+  }
+}
 
 if (!navigator.bluetooth) {
   document.getElementById('unsupported').hidden = false;
@@ -126,9 +176,20 @@ connectButton.addEventListener('click', async () => {
     return;
   }
   muse = new Muse();
-  muse.onEeg = (ch, _seq, samples) => {
+  artifacts = new ArtifactDetector(EEG_SAMPLE_RATE, EEG_CHANNELS.length);
+  artifacts.onBlink = () => {
+    blinkEyes();
+    recording?.events.push({ time: performance.now(), label: 'blink' });
+  };
+  artifacts.onEyeMove = (direction) => {
+    lookTowards(direction);
+    recording?.events.push({ time: performance.now(), label: `eye ${direction}` });
+  };
+  muse.onEeg = (ch, seq, samples) => {
     const buf = buffers[ch];
     const now = performance.now();
+    artifacts.addEeg(ch, samples, now, seq);
+    recording?.eeg[ch].push({ seq, time: now, samples: Array.from(samples) });
     for (let s of samples) {
       if (Math.abs(s) >= RAIL_UV) railedAt[ch] = now;
       for (const filter of filterChains[ch]) s = filter.process(s);
@@ -143,13 +204,18 @@ connectButton.addEventListener('click', async () => {
       `${t.battery.toFixed(0)}% (${(t.voltage / 1000).toFixed(2)} V)`;
   };
   muse.onAccel = (s) => {
+    artifacts.addAccel(s, performance.now());
     document.getElementById('accel').textContent = formatXyz(s[s.length - 1], 2);
   };
   muse.onGyro = (s) => {
+    artifacts.addGyro(s, performance.now());
     document.getElementById('gyro').textContent = formatXyz(s[s.length - 1], 1);
   };
   muse.onDisconnect = () => {
     muse = null;
+    if (recording) stopRecording();
+    recordButton.disabled = true;
+    calibrateButton.disabled = true;
     setStatus('Disconnected');
     connectButton.textContent = 'Connect';
   };
@@ -159,12 +225,114 @@ connectButton.addEventListener('click', async () => {
     await muse.connect();
     setStatus(`Streaming from ${muse.name}`);
     connectButton.textContent = 'Disconnect';
+    recordButton.disabled = false;
+    calibrateButton.disabled = false;
   } catch (err) {
     console.error(err);
     setStatus(`Error: ${err.message}`);
     muse = null;
   }
 });
+
+// Recording: raw EEG packets plus detector events, saved as a CSV when stopped.
+let recording = null;
+
+recordButton.addEventListener('click', () => (recording ? stopRecording() : startRecording()));
+
+function startRecording() {
+  recording = { eeg: EEG_CHANNELS.map(() => []), events: [] };
+  recordButton.textContent = 'Stop & save';
+}
+
+function stopRecording({ save = true, name = 'muse' } = {}) {
+  const finished = recording;
+  recording = null;
+  recordButton.textContent = 'Record';
+  if (!save) return;
+  const csv = recordingCsv(finished);
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-');
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  link.download = `${name}-${stamp}.csv`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+// Gaze calibration: on-screen cues move the eyes left, centre and right in a fixed rhythm
+// while recording, and each cue is written into the CSV so glances can be lined up later.
+const CALIBRATION_STEPS = [
+  { at: 'centre', seconds: 5, text: 'Keep your head still and look at the centre dot' },
+  ...Array.from({ length: 4 }, () => [
+    { at: 'left', seconds: 2, text: 'Look at the left dot' },
+    { at: 'centre', seconds: 3, text: 'Back to the centre' },
+    { at: 'right', seconds: 2, text: 'Look at the right dot' },
+    { at: 'centre', seconds: 3, text: 'Back to the centre' },
+  ]).flat(),
+];
+const cueOverlay = document.getElementById('cue-overlay');
+const cueText = document.getElementById('cue-text');
+let calibration = null; // { cancelled } while a run is in progress
+
+calibrateButton.addEventListener('click', runCalibration);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && calibration) calibration.cancelled = true;
+});
+
+async function runCalibration() {
+  const run = (calibration = { cancelled: false });
+  startRecording();
+  cueOverlay.hidden = false;
+  for (const step of CALIBRATION_STEPS) {
+    for (const dot of cueOverlay.querySelectorAll('.cue-dot')) {
+      dot.classList.toggle('active', dot.dataset.at === step.at);
+    }
+    cueText.textContent = step.text;
+    recording?.events.push({ time: performance.now(), label: `cue ${step.at}` });
+    const end = performance.now() + step.seconds * 1000;
+    while (performance.now() < end && !run.cancelled && recording) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    if (run.cancelled || !recording) break;
+  }
+  cueOverlay.hidden = true;
+  calibration = null;
+  // A disconnect mid-run has already saved the recording; Esc discards it.
+  if (recording) stopRecording({ save: !run.cancelled, name: 'muse-gaze' });
+}
+
+// One row per sample with the raw µV of each channel. Packets with the same sequence
+// number on every channel cover the same 12 samples, so rows are aligned by that.
+function recordingCsv({ eeg, events }) {
+  const bySeq = new Map();
+  eeg.forEach((packets, ch) => {
+    let wraps = 0;
+    let last = null;
+    for (const p of packets) {
+      if (last !== null && p.seq < last - 32768) wraps++;
+      last = p.seq;
+      const key = wraps * 65536 + p.seq;
+      if (!bySeq.has(key)) bySeq.set(key, { time: p.time, channels: [] });
+      bySeq.get(key).channels[ch] = p.samples;
+    }
+  });
+
+  const rows = ['time_ms,' + EEG_CHANNELS.join(',') + ',event'];
+  const pending = [...events].sort((a, b) => a.time - b.time);
+  for (const key of [...bySeq.keys()].sort((a, b) => a - b)) {
+    const { time, channels } = bySeq.get(key);
+    if (EEG_CHANNELS.some((_, ch) => !channels[ch])) continue; // a channel's packet was lost
+    for (let k = 0; k < EEG_SAMPLES_PER_PACKET; k++) {
+      const t = time - ((EEG_SAMPLES_PER_PACKET - 1 - k) * 1000) / EEG_SAMPLE_RATE;
+      let event = '';
+      while (pending.length && pending[0].time <= t) {
+        const label = pending.shift().label;
+        event = event ? `${event};${label}` : label;
+      }
+      rows.push(`${t.toFixed(1)},${channels.map((c) => c[k].toFixed(2)).join(',')},${event}`);
+    }
+  }
+  return rows.join('\n') + '\n';
+}
 
 function setStatus(text) {
   statusEl.textContent = text;
@@ -184,17 +352,46 @@ for (const [c, cx] of [[canvas, ctx], [bandCanvas, bandCtx]]) {
   }).observe(c);
 }
 
+// Welch-style estimate with artifact rejection: the last few seconds are cut into
+// overlapping segments, any segment touching an artifact is dropped (a single blink can
+// outweigh seconds of EEG in the low bands), and the clean ones are averaged. A channel's
+// bars hold their last value only when no segment is clean.
 function updateBandPowers() {
   const segment = new Float32Array(FFT_SIZE);
+  const segmentMs = (FFT_SIZE * 1000) / EEG_SAMPLE_RATE;
+  const marks = artifacts ? artifacts.intervalsUntil(performance.now()) : [];
   for (let ch = 0; ch < EEG_CHANNELS.length; ch++) {
-    if (packetCounts[ch] * EEG_SAMPLES_PER_PACKET < FFT_SIZE) continue;
-    const start = writeIndex[ch] - FFT_SIZE + WINDOW;
-    for (let i = 0; i < FFT_SIZE; i++) segment[i] = buffers[ch][(start + i) % WINDOW];
-    bandPowers(segment, EEG_SAMPLE_RATE).forEach((p, b) => {
-      bandPower[ch][b] += BAND_SMOOTHING * (p - bandPower[ch][b]);
+    if (packetCounts[ch] * EEG_SAMPLES_PER_PACKET < BAND_HISTORY) continue;
+    const sum = BANDS.map(() => 0);
+    let clean = 0;
+    for (let offset = 0; offset + FFT_SIZE <= BAND_HISTORY; offset += FFT_HOP) {
+      const segmentEnd = lastPacketAt[ch] - (offset * 1000) / EEG_SAMPLE_RATE;
+      const touched = marks.some(
+        (m) => m.channels.includes(ch) && m.end > segmentEnd - segmentMs && m.start < segmentEnd,
+      );
+      if (touched) continue;
+      const start = writeIndex[ch] - offset - FFT_SIZE + WINDOW;
+      for (let i = 0; i < FFT_SIZE; i++) segment[i] = buffers[ch][(start + i) % WINDOW];
+      bandPowers(segment, EEG_SAMPLE_RATE).forEach((p, b) => (sum[b] += p));
+      clean++;
+    }
+    bandHeld[ch] = clean === 0;
+    if (bandHeld[ch]) continue;
+    sum.forEach((p, b) => {
+      bandPower[ch][b] += BAND_SMOOTHING * (p / clean - bandPower[ch][b]);
     });
   }
 }
+
+function updateArtifactReadouts() {
+  if (!artifacts) return;
+  const now = performance.now();
+  document.getElementById('blinks').textContent =
+    `${artifacts.blinksInLast(60000, now)} in the last minute`;
+  const muscle = artifacts.activeMuscle().map((ch) => EEG_CHANNELS[ch]);
+  document.getElementById('muscle').textContent = muscle.length ? muscle.join(', ') : '–';
+}
+
 function contactQuality(ch) {
   const now = performance.now();
   if (now - lastPacketAt[ch] > 1000) return NO_DATA;
@@ -224,6 +421,7 @@ function updateContactQuality() {
 setInterval(() => {
   updateBandPowers();
   updateContactQuality();
+  updateArtifactReadouts();
 }, BAND_UPDATE_MS);
 
 // Grouped bars: one group per band, one bar per channel, log scale.
@@ -264,7 +462,9 @@ function drawBands() {
       if (!Number.isFinite(db)) continue;
       const y = yOf(Math.min(DB_MAX, Math.max(DB_MIN, db)));
       bandCtx.fillStyle = COLORS[ch];
+      bandCtx.globalAlpha = bandHeld[ch] ? 0.35 : 1;
       bandCtx.fillRect(x0 + barW * ch, y, barW - 1, yOf(DB_MIN) - y);
+      bandCtx.globalAlpha = 1;
     }
     const cx = left + groupW * (b + 0.5);
     bandCtx.fillStyle = '#e8e8e8';
@@ -293,9 +493,27 @@ function draw() {
   }
   ctx.stroke();
 
+  const marks = artifacts ? artifacts.intervalsUntil(performance.now()) : [];
+
   for (let ch = 0; ch < EEG_CHANNELS.length; ch++) {
     const buf = buffers[ch];
     const mid = laneH * (ch + 0.5);
+
+    // Shade artifacts in this lane. The newest sample (right edge) arrived at lastPacketAt.
+    const toX = (t) => w - ((lastPacketAt[ch] - t) / (WINDOW_SECONDS * 1000)) * w;
+    ctx.font = '10px system-ui, sans-serif';
+    for (const mark of marks) {
+      if (!mark.channels.includes(ch)) continue;
+      const x0 = Math.max(0, toX(mark.start));
+      const x1 = Math.min(w, toX(mark.end));
+      if (x1 <= x0) continue;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.07)';
+      ctx.fillRect(x0, laneH * ch, x1 - x0, laneH);
+      if (x1 - x0 > 40) {
+        ctx.fillStyle = '#8f8f8f';
+        ctx.fillText(MARK_LABELS[mark.type], x0 + 4, laneH * (ch + 1) - 6);
+      }
+    }
 
     // Remove the DC offset so traces stay centred in their lane.
     let mean = 0;

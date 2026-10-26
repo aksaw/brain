@@ -36,6 +36,14 @@ export function highpass(cutoff, rate) {
   return new Biquad((1 + cos) / 2, -(1 + cos), (1 + cos) / 2, 1 + alpha, -2 * cos, 1 - alpha);
 }
 
+// Butterworth low-pass: removes content above `cutoff` Hz.
+export function lowpass(cutoff, rate) {
+  const w = (2 * Math.PI * cutoff) / rate;
+  const cos = Math.cos(w);
+  const alpha = Math.sin(w) / (2 * Math.SQRT1_2);
+  return new Biquad((1 - cos) / 2, 1 - cos, (1 - cos) / 2, 1 + alpha, -2 * cos, 1 - alpha);
+}
+
 // Narrow notch at `freq` Hz for mains interference; higher q means narrower.
 export function notch(freq, rate, q = 20) {
   const w = (2 * Math.PI * freq) / rate;

@@ -40,13 +40,62 @@ button, select {
   cursor: pointer;
 }
 
-button:hover { border-color: var(--accent); }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: 0.4; cursor: default; }
 
 #status { color: var(--muted); }
 
 #unsupported { color: var(--warn); }
 
 header input[type='checkbox'] { accent-color: var(--accent); }
+
+/* Gaze calibration: full-screen targets at the far left, centre and far right. */
+#cue-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: var(--bg);
+}
+
+#cue-overlay[hidden] { display: none; }
+
+.cue-dot {
+  position: absolute;
+  top: 50%;
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border: 2px solid #424242;
+  border-radius: 50%; /* no transition: the dot must jump exactly when the cue is logged */
+}
+
+.cue-dot[data-at='left'] { left: 34px; }
+.cue-dot[data-at='centre'] { left: 50%; }
+.cue-dot[data-at='right'] { left: calc(100% - 34px); }
+
+.cue-dot.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  transform: scale(1.4);
+}
+
+#cue-text {
+  position: absolute;
+  top: calc(50% + 48px);
+  width: 100%;
+  margin: 0;
+  text-align: center;
+  font-size: 18px;
+}
+
+.cue-hint {
+  position: absolute;
+  bottom: 24px;
+  width: 100%;
+  margin: 0;
+  text-align: center;
+  color: var(--muted);
+}
 
 .q-good { color: var(--fg); }
 .q-fair { color: var(--warn); }
@@ -70,6 +119,7 @@ main {
 
 .panels {
   grid-column: 1;
+  grid-row: 2;
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
@@ -106,9 +156,33 @@ main {
 
 #montage svg { display: block; width: 100%; height: auto; }
 
+/* Eyes sit in the second row, under the electrode chart. */
+#eyes {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: center;
+  width: min(100%, 320px);
+  margin: 0;
+}
+
+#eyes svg { display: block; width: 100%; height: auto; }
+
+/* Line art matching the electrode chart: outline like the head, iris like an empty site. */
+#eyes .eye-outline { fill: none; stroke: #424242; stroke-width: 2.5; }
+#eyes .iris { fill: #1e1e1e; stroke: #424242; stroke-width: 1.8; }
+#eyes .pupil { fill: #424242; }
+#eyes .gaze { transition: transform 120ms ease-out; }
+
+/* Blinks squash each eye about its centre (animated from app.js). */
+#eyes .eye {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
 @media (max-width: 720px) {
   main { grid-template-columns: minmax(0, 1fr); }
   #montage { width: 100%; max-width: 420px; justify-self: center; }
+  #eyes, .panels { grid-column: auto; grid-row: auto; }
 }
 
 #montage .head { fill: none; stroke: #424242; stroke-width: 1.5; }
