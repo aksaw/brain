@@ -1,0 +1,215 @@
+:root {
+  --bg: #141414;
+  --fg: #e8e8e8;
+  --muted: #8f8f8f;
+  --grid: #2a2a2a;
+  --accent: #437bbd;
+  --warn: #b77f4d;
+  --bad: #b8555b;
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  padding: 16px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.4 system-ui, sans-serif;
+}
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+h1 {
+  font-size: 18px;
+  margin: 0 8px 0 0;
+}
+
+button, select {
+  font: inherit;
+  color: var(--fg);
+  background: var(--grid);
+  border: 1px solid #424242;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: 0.4; cursor: default; }
+
+#status { color: var(--muted); }
+
+#unsupported { color: var(--warn); }
+
+header input[type='checkbox'] { accent-color: var(--accent); }
+
+/* Gaze calibration: full-screen targets at the far left, centre and far right. */
+#cue-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: var(--bg);
+}
+
+#cue-overlay[hidden] { display: none; }
+
+.cue-dot {
+  position: absolute;
+  top: 50%;
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border: 2px solid #424242;
+  border-radius: 50%; /* no transition: the dot must jump exactly when the cue is logged */
+}
+
+.cue-dot[data-at='left'] { left: 34px; }
+.cue-dot[data-at='centre'] { left: 50%; }
+.cue-dot[data-at='right'] { left: calc(100% - 34px); }
+
+.cue-dot.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  transform: scale(1.4);
+}
+
+#cue-text {
+  position: absolute;
+  top: calc(50% + 48px);
+  width: 100%;
+  margin: 0;
+  text-align: center;
+  font-size: 18px;
+}
+
+.cue-hint {
+  position: absolute;
+  bottom: 24px;
+  width: 100%;
+  margin: 0;
+  text-align: center;
+  color: var(--muted);
+}
+
+.q-good { color: var(--fg); }
+.q-fair { color: var(--warn); }
+.q-poor { color: var(--bad); }
+
+#eeg {
+  display: block;
+  width: 100%;
+  height: 60vh;
+  min-height: 320px;
+  background: #0d0d0d;
+  border-radius: 8px;
+}
+
+/* Plot with the electrode chart to its right; readouts and band chart in a row below the plot. */
+main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 16px;
+}
+
+.panels {
+  grid-column: 1;
+  grid-row: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16px 48px;
+}
+
+.panels #bands { flex: 1 1 360px; min-width: 0; }
+
+#bands h2 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+#band-chart {
+  display: block;
+  width: 100%;
+  height: 220px;
+}
+
+.readouts {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+#montage {
+  margin: 0;
+  width: clamp(320px, 60vh, 45vw);
+  align-self: center;
+}
+
+#montage svg { display: block; width: 100%; height: auto; }
+
+/* Eyes sit in the second row, under the electrode chart. */
+#eyes {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: center;
+  width: min(100%, 320px);
+  margin: 0;
+}
+
+#eyes svg { display: block; width: 100%; height: auto; }
+
+/* Line art matching the electrode chart: outline like the head, iris like an empty site. */
+#eyes .eye-outline { fill: none; stroke: #424242; stroke-width: 2.5; }
+#eyes .iris { fill: #1e1e1e; stroke: #424242; stroke-width: 1.8; }
+#eyes .pupil { fill: #424242; }
+#eyes .gaze { transition: transform 120ms ease-out; }
+
+/* Blinks squash each eye about its centre (animated from app.js). */
+#eyes .eye {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+@media (max-width: 720px) {
+  main { grid-template-columns: minmax(0, 1fr); }
+  #montage { width: 100%; max-width: 420px; justify-self: center; }
+  #eyes, .panels { grid-column: auto; grid-row: auto; }
+}
+
+#montage .head { fill: none; stroke: #424242; stroke-width: 1.5; }
+#montage .ring { fill: none; stroke: var(--grid); stroke-dasharray: 3 3; }
+#montage .site { fill: #1e1e1e; stroke: #424242; }
+#montage .site-label { fill: var(--muted); font-size: 6.5px; }
+#montage .ref { fill: #1e1e1e; stroke: var(--fg); stroke-dasharray: 2 1.5; }
+#montage .muse-label { fill: #0d0d0d; font-size: 6.5px; font-weight: 700; }
+
+#stats {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+#stats th, #stats td {
+  padding: 4px 16px 4px 0;
+  text-align: left;
+}
+
+#stats th { color: var(--muted); font-weight: 500; }
+
+#telemetry {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+#telemetry dt { color: var(--muted); }
+#telemetry dd { margin: 0; }
