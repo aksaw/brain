@@ -1,26 +1,37 @@
-import { Normalizer, Wavetable, Heterodyne } from './sonify-core.js';
+import { Normalizer, Granular, Bitcrusher, SpectralMap, LayeredShift } from './sonify-core.js';
 
-// Audio-thread side of the sonification: turns the two bipolar EEG signals (left side
-// AF7 - TP9, right side AF8 - TP10) into the left and right audio channels. The page
-// posts EEG in small batches and settings as they change.
+// Audio-thread side of the sonification. Each side of the head arrives as the plot's x and
+// y (left AF7 and TP9, right AF8 and TP10) and becomes one audio channel. Granular
+// plays the bipolar difference x - y; the other modes treat the point x + iy as a complex
+// signal, so the trace's direction of rotation is audible. The page posts EEG in small
+// batches and settings as they change.
 class Sonifier extends AudioWorkletProcessor {
   constructor() {
     super();
-    this.settings = { mode: 'off', pitch: 110, shift: 200 };
+    this.settings = {
+      mode: 'off',
+      speed: 50,
+      crush: false,
+      map: { eegLow: 1, eegHigh: 45, audioLow: 55, audioHigh: 7040 },
+    };
     this.sides = [0, 1].map(() => ({
-      normalizer: new Normalizer(),
-      wavetable: new Wavetable(),
-      heterodyne: new Heterodyne(),
+      bipolar: new Normalizer(),
+      trace: new Normalizer(),
+      granular: new Granular(),
+      crusher: new Bitcrusher(),
+      spectral: new SpectralMap(),
+      layers: new LayeredShift(),
     }));
     this.port.onmessage = ({ data }) => {
       if (data.type === 'settings') Object.assign(this.settings, data.settings);
       if (data.type === 'eeg') {
-        data.sides.forEach((samples, s) => {
+        data.sides.forEach(({ x, y }, s) => {
           const side = this.sides[s];
-          for (const x of samples) {
-            const v = side.normalizer.process(x);
-            side.wavetable.push(v);
-            side.heterodyne.push(v);
+          for (let i = 0; i < x.length; i++) {
+            side.granular.push(side.bipolar.process(x[i] - y[i]));
+            const g = side.trace.gain(x[i] * x[i] + y[i] * y[i]);
+            side.spectral.push(g * x[i], g * y[i]);
+            side.layers.push(g * x[i], g * y[i]);
           }
         });
       }
@@ -28,15 +39,22 @@ class Sonifier extends AudioWorkletProcessor {
   }
 
   process(_inputs, outputs) {
-    const { mode, pitch, shift } = this.settings;
+    const { mode, speed, crush, map } = this.settings;
     outputs[0].forEach((channel, s) => {
       const side = this.sides[s];
-      for (let n = 0; n < channel.length; n++) {
-        let y = 0;
-        if (mode === 'audify') y = side.wavetable.next(pitch, sampleRate);
-        else if (mode === 'shift') y = side.heterodyne.next(shift, sampleRate);
-        channel[n] = Math.tanh(y); // soft limit, so blinks and pops can't blast
+      channel.fill(0);
+      if (mode === 'granular') {
+        for (let n = 0; n < channel.length; n++) {
+          const y = side.granular.next(speed, sampleRate);
+          channel[n] = crush ? side.crusher.process(y, sampleRate) : y;
+        }
+      } else if (mode === 'layers') {
+        for (let n = 0; n < channel.length; n++) channel[n] = side.layers.next(sampleRate);
+      } else if (mode === 'spectral') {
+        side.spectral.render(channel, map, sampleRate);
       }
+      // Soft limit, so blinks and pops can't blast.
+      for (let n = 0; n < channel.length; n++) channel[n] = Math.tanh(channel[n]);
     });
     return true;
   }

@@ -1,5 +1,5 @@
 import { Muse, EEG_CHANNELS, EEG_SAMPLE_RATE, EEG_SAMPLES_PER_PACKET } from './muse.js';
-import { highpass, notch } from './filters.js';
+import { highpass, lowpass, notch } from './filters.js';
 
 // Each plot traces one side of the head: its forehead channel on x, its ear channel on y.
 const PLOTS = [
@@ -8,6 +8,8 @@ const PLOTS = [
 ];
 const HIGHPASS_HZ = 1;
 const MAINS_HZ = 60;
+const DISPLAY_LOWPASS_HZ = 15; // smooths the traces only; the sound gets the full band
+const SOUND_TOP_HZ = 45; // top of the EEG band the spectral map spreads over the audio range
 const RING = 4 * EEG_SAMPLE_RATE; // filtered samples kept per channel
 const FADE_STEPS = 16; // the trail is drawn in this many pieces, older ones fainter
 
@@ -30,10 +32,19 @@ const plots = PLOTS.map((p) => {
 // so x and y come from the same instant even though each channel arrives in its own
 // packets, sometimes late or in bursts.
 let channels = [];
+
+// Every channel gets the high-pass and mains notch; `values` (fed to the sound) stop
+// there. The traces then also pass a low-pass, two stages in series (24 dB per octave),
+// into `display`, to strip high-frequency noise such as muscle.
 function resetChannels() {
   channels = EEG_CHANNELS.map(() => ({
     filters: [highpass(HIGHPASS_HZ, EEG_SAMPLE_RATE), notch(MAINS_HZ, EEG_SAMPLE_RATE)],
+    smoothing: [
+      lowpass(DISPLAY_LOWPASS_HZ, EEG_SAMPLE_RATE),
+      lowpass(DISPLAY_LOWPASS_HZ, EEG_SAMPLE_RATE),
+    ],
     values: new Float32Array(RING),
+    display: new Float32Array(RING),
     first: null, // index of the first sample received
     end: 0, // one past the newest sample index
     lastSeq: null,
@@ -50,19 +61,26 @@ function addSamples(ch, seq, samples) {
   samples.forEach((s, k) => {
     for (const filter of c.filters) s = filter.process(s);
     c.values[(firstIndex + k) % RING] = s;
+    for (const filter of c.smoothing) s = filter.process(s);
+    c.display[(firstIndex + k) % RING] = s;
   });
   c.first ??= firstIndex;
   c.end = Math.max(c.end, firstIndex + samples.length);
   feedAudio();
 }
 
-// Sound: each ear gets one side's bipolar signal, forehead minus ear channel. Both are
-// measured against the Fpz reference, so the difference cancels what the reference picks up.
-const [TP9, AF7, AF8, TP10] = ['TP9', 'AF7', 'AF8', 'TP10'].map((n) => EEG_CHANNELS.indexOf(n));
+// Sound: each ear gets one side's trace, the same x (forehead) and y (ear) the plot draws,
+// but without the plot's low-pass, so the sound keeps the high frequencies.
+const SIDES = [
+  { x: EEG_CHANNELS.indexOf('AF7'), y: EEG_CHANNELS.indexOf('TP9') },
+  { x: EEG_CHANNELS.indexOf('AF8'), y: EEG_CHANNELS.indexOf('TP10') },
+];
 const soundSelect = document.getElementById('sound');
-const pitchSelect = document.getElementById('pitch');
-const shiftSelect = document.getElementById('shift');
+const speedSelect = document.getElementById('speed');
+const crushCheckbox = document.getElementById('crush');
+const rangeSelect = document.getElementById('range');
 const volumeInput = document.getElementById('volume');
+const reverbInput = document.getElementById('reverb');
 let audio = null; // { context, node, gain } once sound has been switched on
 let sentEnd = null; // one past the newest sample index sent to the audio thread
 
@@ -79,14 +97,16 @@ function feedAudio() {
     return;
   }
   if (end <= sentEnd) return;
-  const left = new Float32Array(end - sentEnd);
-  const right = new Float32Array(end - sentEnd);
-  for (let i = sentEnd; i < end; i++) {
-    const v = (ch) => channels[ch].values[i % RING];
-    left[i - sentEnd] = v(AF7) - v(TP9);
-    right[i - sentEnd] = v(AF8) - v(TP10);
-  }
-  audio.node.port.postMessage({ type: 'eeg', sides: [left, right] }, [left.buffer, right.buffer]);
+  const sides = SIDES.map(({ x, y }) => {
+    const side = { x: new Float32Array(end - sentEnd), y: new Float32Array(end - sentEnd) };
+    for (let i = sentEnd; i < end; i++) {
+      side.x[i - sentEnd] = channels[x].values[i % RING];
+      side.y[i - sentEnd] = channels[y].values[i % RING];
+    }
+    return side;
+  });
+  const buffers = sides.flatMap(({ x, y }) => [x.buffer, y.buffer]);
+  audio.node.port.postMessage({ type: 'eeg', sides }, buffers);
   sentEnd = end;
 }
 
@@ -97,22 +117,56 @@ async function startAudio() {
     numberOfInputs: 0,
     outputChannelCount: [2],
   });
+  // Dry and reverberated paths are mixed into the volume control.
+  const dry = context.createGain();
+  const wet = context.createGain();
+  const reverb = context.createConvolver();
+  reverb.buffer = reverbImpulse(context);
   const gain = context.createGain();
-  node.connect(gain).connect(context.destination);
-  audio = { context, node, gain };
+  node.connect(dry).connect(gain);
+  node.connect(reverb).connect(wet).connect(gain);
+  gain.connect(context.destination);
+  audio = { context, node, gain, dry, wet };
+}
+
+// A generated room: decaying noise, falling 60 dB over `seconds`, independent for each
+// ear so each side's reverb stays on its own side.
+function reverbImpulse(context, seconds = 2.5) {
+  const length = Math.round(seconds * context.sampleRate);
+  const impulse = context.createBuffer(2, length, context.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const data = impulse.getChannelData(ch);
+    for (let i = 0; i < length; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp((-6.9 * i) / length);
+    }
+  }
+  return impulse;
 }
 
 function sendSoundSettings() {
   const mode = soundSelect.value;
-  document.getElementById('pitch-control').hidden = mode !== 'audify';
-  document.getElementById('shift-control').hidden = mode !== 'shift';
+  document.getElementById('speed-control').hidden = mode !== 'granular';
+  document.getElementById('crush-control').hidden = mode !== 'granular';
+  document.getElementById('range-control').hidden = mode !== 'spectral';
   if (!audio) return;
+  // The spectral map spreads the EEG band from the high-pass up to SOUND_TOP_HZ over the
+  // chosen audio range.
+  const map = {
+    eegLow: HIGHPASS_HZ,
+    eegHigh: SOUND_TOP_HZ,
+    audioLow: 55,
+    audioHigh: Number(rangeSelect.value),
+  };
   audio.node.port.postMessage({
     type: 'settings',
-    settings: { mode, pitch: Number(pitchSelect.value), shift: Number(shiftSelect.value) },
+    settings: { mode, speed: Number(speedSelect.value), crush: crushCheckbox.checked, map },
   });
   // Volume on a squared curve, which sounds more even across the slider.
-  audio.gain.gain.setTargetAtTime(Number(volumeInput.value) ** 2, audio.context.currentTime, 0.05);
+  const now = audio.context.currentTime;
+  audio.gain.gain.setTargetAtTime(Number(volumeInput.value) ** 2, now, 0.05);
+  const reverb = Number(reverbInput.value);
+  audio.wet.gain.setTargetAtTime(reverb, now, 0.05);
+  audio.dry.gain.setTargetAtTime(1 - 0.5 * reverb, now, 0.05);
 }
 
 soundSelect.addEventListener('change', async () => {
@@ -123,9 +177,10 @@ soundSelect.addEventListener('change', async () => {
   if (soundSelect.value === 'off') audio.context.suspend();
   else audio.context.resume();
 });
-for (const control of [pitchSelect, shiftSelect, volumeInput]) {
+for (const control of [speedSelect, rangeSelect, volumeInput, reverbInput]) {
   control.addEventListener('input', sendSoundSettings);
 }
+crushCheckbox.addEventListener('change', sendSoundSettings);
 
 let muse = null;
 
@@ -197,8 +252,8 @@ function drawPlot(p, scale, trail) {
   if (end - start < 2) return;
 
   const point = (i) => [
-    mid + toPx(cx.values[i % RING]),
-    mid - toPx(cy.values[i % RING]),
+    mid + toPx(cx.display[i % RING]),
+    mid - toPx(cy.display[i % RING]),
   ];
 
   // Oldest pieces first and faintest; each piece starts where the last one ended.
