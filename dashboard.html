@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rhythms of the Brain</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <button id="connect">Connect</button>
+    <button id="record" disabled>Record</button>
+    <button id="calibrate" disabled>Gaze calibration</button>
+    <label>
+      Scale
+      <select id="scale">
+        <option value="50">±50 µV</option>
+        <option value="100" selected>±100 µV</option>
+        <option value="200">±200 µV</option>
+        <option value="500">±500 µV</option>
+        <option value="1000">±1000 µV</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="highpass" checked> 1 Hz high-pass</label>
+    <label><input type="checkbox" id="notch" checked> 60 Hz notch</label>
+    <span id="status">Disconnected</span>
+  </header>
+
+  <p id="unsupported" hidden>
+    Web Bluetooth isn't available here. Use Chrome or Edge, and serve this page from
+    <code>localhost</code> or HTTPS.
+  </p>
+
+  <main>
+    <canvas id="eeg"></canvas>
+    <figure id="montage">
+      <svg viewBox="-125 -125 250 250" role="img"
+           aria-label="10-20 electrode chart, top view, nose up, with the measured electrodes highlighted"></svg>
+    </figure>
+    <figure id="eyes">
+      <svg viewBox="0 0 220 52" role="img" aria-label="A pair of eyes that blink and look sideways when you do">
+        <defs>
+          <clipPath id="eye-shape">
+            <path d="M -34 0 Q 0 -34 34 0 Q 0 34 -34 0 Z" />
+          </clipPath>
+        </defs>
+        <g transform="translate(62 26)"><g class="eye">
+          <g clip-path="url(#eye-shape)"><g class="gaze">
+            <circle class="iris" r="12" />
+            <circle class="pupil" r="5" />
+          </g></g>
+          <path class="eye-outline" d="M -34 0 Q 0 -34 34 0 Q 0 34 -34 0 Z" />
+        </g></g>
+        <g transform="translate(158 26)"><g class="eye">
+          <g clip-path="url(#eye-shape)"><g class="gaze">
+            <circle class="iris" r="12" />
+            <circle class="pupil" r="5" />
+          </g></g>
+          <path class="eye-outline" d="M -34 0 Q 0 -34 34 0 Q 0 34 -34 0 Z" />
+        </g></g>
+      </svg>
+    </figure>
+    <div class="panels">
+      <div class="readouts">
+        <table id="stats">
+          <thead><tr><th>Channel</th><th>Contact</th><th>Std dev (µV)</th><th>Packets</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <dl id="telemetry">
+          <dt>Battery</dt><dd id="battery">–</dd>
+          <dt>Accel (g)</dt><dd id="accel">–</dd>
+          <dt>Gyro (°/s)</dt><dd id="gyro">–</dd>
+          <dt>Blinks</dt><dd id="blinks">–</dd>
+          <dt>Muscle</dt><dd id="muscle">–</dd>
+        </dl>
+      </div>
+      <section id="bands">
+        <h2>Band power (dB re 1 µV²)</h2>
+        <canvas id="band-chart"></canvas>
+      </section>
+    </div>
+  </main>
+
+  <div id="cue-overlay" hidden>
+    <div class="cue-dot" data-at="left"></div>
+    <div class="cue-dot" data-at="centre"></div>
+    <div class="cue-dot" data-at="right"></div>
+    <p id="cue-text"></p>
+    <p class="cue-hint">Move only your eyes · Esc to cancel</p>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

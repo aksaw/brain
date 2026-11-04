@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bineural</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    /* The plots fill the space below the header, centred both ways. */
+    body {
+      background: #000;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      box-sizing: border-box;
+    }
+
+    .xy {
+      flex: 1;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-content: center;
+      align-items: center;
+      gap: 24px;
+    }
+
+    .xy figure {
+      margin: 0;
+      width: min(100%, 46vw, 72vh);
+    }
+
+    .xy canvas {
+      display: block;
+      width: 100%;
+      aspect-ratio: 1;
+      background: #000;
+    }
+
+    header a { color: var(--muted); margin-left: auto; }
+    header label[hidden] { display: none; }
+    #volume { accent-color: var(--accent); vertical-align: middle; }
+
+    @media (max-width: 720px) {
+      .xy figure { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <button id="connect">Connect</button>
+    <label>
+      Scale
+      <select id="scale">
+        <option value="50">±50 µV</option>
+        <option value="100" selected>±100 µV</option>
+        <option value="200">±200 µV</option>
+        <option value="500">±500 µV</option>
+      </select>
+    </label>
+    <label>
+      Trail
+      <select id="trail">
+        <option value="0.25">0.25 s</option>
+        <option value="0.5">0.5 s</option>
+        <option value="1" selected>1 s</option>
+        <option value="2">2 s</option>
+      </select>
+    </label>
+    <label>
+      Sound
+      <select id="sound">
+        <option value="off">Off</option>
+        <option value="audify">Audification</option>
+        <option value="shift">Frequency shift</option>
+      </select>
+    </label>
+    <label id="pitch-control" hidden>
+      Pitch
+      <select id="pitch">
+        <option value="55">55 Hz</option>
+        <option value="110" selected>110 Hz</option>
+        <option value="220">220 Hz</option>
+      </select>
+    </label>
+    <label id="shift-control" hidden>
+      Shift
+      <select id="shift">
+        <option value="100">+100 Hz</option>
+        <option value="200" selected>+200 Hz</option>
+        <option value="400">+400 Hz</option>
+        <option value="800">+800 Hz</option>
+      </select>
+    </label>
+    <label>
+      Volume
+      <input type="range" id="volume" min="0" max="1" step="0.01" value="0.5">
+    </label>
+    <a href="dashboard.html">Dashboard</a>
+  </header>
+
+  <p id="unsupported" hidden>
+    Web Bluetooth isn't available here. Use Chrome or Edge, and serve this page from
+    <code>localhost</code> or HTTPS.
+  </p>
+
+  <main class="xy">
+    <figure>
+      <canvas id="left-plot" role="img" aria-label="Left hemisphere: AF7 (x) against TP9 (y)"></canvas>
+    </figure>
+    <figure>
+      <canvas id="right-plot" role="img" aria-label="Right hemisphere: AF8 (x) against TP10 (y)"></canvas>
+    </figure>
+  </main>
+
+  <script type="module" src="bineural.js"></script>
+</body>
+</html>
