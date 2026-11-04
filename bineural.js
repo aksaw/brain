@@ -224,25 +224,36 @@ connectButton.addEventListener('click', async () => {
   }
 });
 
+// Overlay: both hemispheres in one plot, drawn additively at full strength, so where the
+// fading parts of the two trails cross, their light adds up. Neither is mirrored:
+// activity common to both sides moves both traces the same way, fusing the figures.
+const overlayCheckbox = document.getElementById('overlay');
+const overlayCanvas = document.getElementById('overlay-plot');
+const overlay = { canvas: overlayCanvas, ctx: overlayCanvas.getContext('2d') };
+
+overlayCheckbox.addEventListener('change', () => {
+  for (const figure of document.querySelectorAll('.xy .split')) figure.hidden = overlayCheckbox.checked;
+  document.getElementById('overlay-figure').hidden = !overlayCheckbox.checked;
+});
+
 // Keep each canvas's pixel buffer matched to its on-screen size.
-for (const p of plots) {
+for (const target of [...plots, overlay]) {
   new ResizeObserver(() => {
     const dpr = window.devicePixelRatio || 1;
-    p.canvas.width = p.canvas.clientWidth * dpr;
-    p.canvas.height = p.canvas.clientHeight * dpr;
-    p.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }).observe(p.canvas);
+    target.canvas.width = target.canvas.clientWidth * dpr;
+    target.canvas.height = target.canvas.clientHeight * dpr;
+    target.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }).observe(target.canvas);
 }
 
-function drawPlot(p, scale, trail) {
-  const { ctx } = p;
-  const size = p.canvas.clientWidth;
+// Draws plot p's trace into `target`: its own canvas, or the overlay.
+function drawTrace(target, p, scale, trail) {
+  const { ctx } = target;
+  const size = target.canvas.clientWidth;
   const mid = size / 2;
   const radius = mid - 12;
   // µV to pixels, clamped to the edge so large swings stay visible.
   const toPx = (v) => (Math.max(-scale, Math.min(scale, v)) / scale) * radius;
-
-  ctx.clearRect(0, 0, size, size);
 
   const cx = channels[p.xi];
   const cy = channels[p.yi];
@@ -279,10 +290,24 @@ function drawPlot(p, scale, trail) {
   ctx.fill();
 }
 
+function clear(target) {
+  target.ctx.clearRect(0, 0, target.canvas.clientWidth, target.canvas.clientHeight);
+}
+
 function draw() {
   const scale = Number(scaleSelect.value);
   const trail = Math.round(Number(trailSelect.value) * EEG_SAMPLE_RATE);
-  for (const p of plots) drawPlot(p, scale, trail);
+  if (overlayCheckbox.checked) {
+    clear(overlay);
+    overlay.ctx.globalCompositeOperation = 'lighter'; // overlapping light adds up
+    for (const p of plots) drawTrace(overlay, p, scale, trail);
+    overlay.ctx.globalCompositeOperation = 'source-over';
+  } else {
+    for (const p of plots) {
+      clear(p);
+      drawTrace(p, p, scale, trail);
+    }
+  }
   requestAnimationFrame(draw);
 }
 requestAnimationFrame(draw);

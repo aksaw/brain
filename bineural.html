@@ -30,6 +30,11 @@
       width: min(100%, 46vw, 72vh);
     }
 
+    .xy figure[hidden] { display: none; }
+
+    /* The overlay holds both hemispheres in one, larger plot. */
+    .xy #overlay-figure { width: min(100%, 92vw, 80vh); }
+
     .xy canvas {
       display: block;
       width: 100%;
@@ -67,6 +72,7 @@
         <option value="2">2 s</option>
       </select>
     </label>
+    <label><input type="checkbox" id="overlay"> Overlay</label>
     <label>
       Sound
       <select id="sound">
@@ -110,11 +116,15 @@
   </p>
 
   <main class="xy">
-    <figure>
+    <figure class="split">
       <canvas id="left-plot" role="img" aria-label="Left hemisphere: AF7 (x) against TP9 (y)"></canvas>
     </figure>
-    <figure>
+    <figure class="split">
       <canvas id="right-plot" role="img" aria-label="Right hemisphere: AF8 (x) against TP10 (y)"></canvas>
+    </figure>
+    <figure id="overlay-figure" hidden>
+      <canvas id="overlay-plot" role="img"
+              aria-label="Both hemispheres overlaid: AF7 against TP9 and AF8 against TP10"></canvas>
     </figure>
   </main>
 
