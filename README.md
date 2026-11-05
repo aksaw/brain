@@ -47,7 +47,11 @@ another.
   - shell between hemispheres: lofted between the left and right curves, with tubes along
     the edges (None: bare surface);
   - shrink-wrap: metaballs spaced evenly along the trail, fusing where it passes close to
-    itself; the Ball size slider sets their radius live;
+    itself. Live controls: Ball size (radius); Blend (how far each ball's field reaches:
+    separate strands at low settings, one liquid skin at high); Spacing (distance between
+    balls along the curve, in ball radii: smooth cord when close, beads when far); Grid
+    (how finely the surface is sampled: faceted at 24, smooth at 72, which is also much
+    slower). Balls are thinned out automatically when there'd be too many to compute;
   - recurrence threads: a thread wherever the trajectory returns close to where it was at
     least half a cycle earlier (a recurrence plot in 3D); the Closeness slider sets how
     close counts, live.

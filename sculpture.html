@@ -114,6 +114,27 @@
       Ball size
       <input type="range" id="ball-size" min="0.04" max="0.4" step="0.01" value="0.15">
     </label>
+    <!-- How far each ball's field reaches, in ball radii: beads (low) to liquid (high). -->
+    <label id="blend-control" hidden>
+      Blend
+      <input type="range" id="blend" min="1.3" max="3" step="0.05" value="1.9">
+    </label>
+    <!-- Distance between balls along the curve, in ball radii: smooth (low) to beaded (high). -->
+    <label id="spacing-control" hidden>
+      Spacing
+      <input type="range" id="spacing" min="0.2" max="3" step="0.05" value="0.75">
+    </label>
+    <!-- How finely the metaball surface is sampled: faceted (low) to smooth (high). -->
+    <label id="grid-control" hidden>
+      Grid
+      <select id="grid">
+        <option value="24">24</option>
+        <option value="32">32</option>
+        <option value="40" selected>40</option>
+        <option value="56">56</option>
+        <option value="72">72</option>
+      </select>
+    </label>
     <label id="closeness-control" hidden>
       Closeness
       <input type="range" id="closeness" min="0.02" max="0.3" step="0.01" value="0.12">

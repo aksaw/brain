@@ -28,6 +28,9 @@ const controlsIn = {
   material: $('material'),
   thickness: $('thickness'),
   ballSize: $('ball-size'),
+  blend: $('blend'),
+  spacing: $('spacing'),
+  grid: $('grid'),
   closeness: $('closeness'),
   rotate: $('rotate'),
   freeze: $('freeze'),
@@ -496,13 +499,15 @@ class Segments {
 }
 
 // Metaballs: a field of soft balls along the trail whose surface (marching cubes) fuses
-// wherever the trail passes close to itself. The field spans ±BLOB_SPAN plot radii.
-const BLOB_RESOLUTION = 40;
+// wherever the trail passes close to itself. The field spans ±BLOB_SPAN plot radii, in a
+// grid of `resolution` cells a side (the Grid menu; changing it rebuilds the metaballs).
 const BLOB_SPAN = 1.4;
 const MAX_BALLS = 400;
 
-function makeBlobs(material) {
-  const blobs = new MarchingCubes(BLOB_RESOLUTION, material, true, false, 40000);
+function makeBlobs(material, resolution = 40) {
+  const maxTriangles = Math.round(40000 * (resolution / 40) ** 2); // surfaces grow with the grid
+  const blobs = new MarchingCubes(resolution, material, true, false, maxTriangles);
+  blobs.resolution = resolution;
   blobs.scale.setScalar(BLOB_SPAN);
   blobs.castShadow = true;
   blobs.receiveShadow = true;
@@ -525,7 +530,9 @@ const pieces = SIDES.map(() => {
     sculpture.add(mesh);
   }
   return { tube, head, line, shell, rims, segments, blobs };
-});new ResizeObserver(() => {
+});
+
+new ResizeObserver(() => {
   const { clientWidth: w, clientHeight: h } = stage;
   renderer.setSize(w, h);
   camera.aspect = w / Math.max(1, h);
@@ -677,11 +684,17 @@ function drawTrailLine(piece, n) {
 
 // Shrink-wrap: metaballs along the trail, fusing into one skin where it passes close to
 // itself. The Ball size slider sets their radius (plot radii); they shrink over the
-// trail's oldest part. Balls are spaced evenly by distance along the curve (three
-// quarters of a ball radius apart, so they always fuse), at multiples of that distance as measured by the
-// anchored ArcLength, so they stay put on the curve as it advances instead of sliding.
-// Past MAX_BALLS the spacing doubles (keeping every other ball), rather than changing
-// smoothly, which would make every ball shift.
+// trail's oldest part. The Blend slider sets how far each ball's field reaches beyond its
+// surface, in ball radii: about 1.3 keeps balls as separate beads, 3 melts neighbouring
+// loops into one liquid skin. Balls are spaced evenly by distance along the curve (the
+// Spacing slider, in ball radii: close spacing fuses into a smooth cord, wide spacing
+// leaves beads), at multiples of that distance as measured by the anchored ArcLength, so
+// they stay put on the curve as it advances instead of sliding. When there would be too
+// many to compute in time (more balls, bigger balls and wider reach all cost more), the
+// spacing doubles (keeping every other ball) rather than changing smoothly, which would
+// make every ball shift.
+const BLOB_BUDGET = 1.5e6; // field cells updated per side per frame, under 10 ms
+
 function buildBlobs(piece, curve, trail) {
   const samples = trailPoints(curve, trail);
   if (!samples) return;
@@ -694,12 +707,16 @@ function buildBlobs(piece, curve, trail) {
   const blobs = piece.blobs;
   const size = Number(controlsIn.ballSize.value);
   const radius = size / (2 * BLOB_SPAN); // in the field's 0..1 units
-  // Each ball's field reaches about 1.9 radii (set by `subtract`): enough to fuse with its
-  // neighbours, short enough that big balls stay cheap to compute.
-  const subtract = 30;
-  const strength = (blobs.isolation + subtract) * radius * radius; // one ball's surface at radius
-  let spacing = 0.75 * size;
-  while ((arc[n - 1] - arc[0]) / spacing > MAX_BALLS) spacing *= 2;
+  // A ball's field is strength / d² - subtract, cut off at zero. Its surface sits where the
+  // field equals the isolation level (at `radius`) and its field ends at reach × radius,
+  // which gives subtract = isolation / (reach² - 1).
+  const reach = Number(controlsIn.blend.value);
+  const subtract = blobs.isolation / (reach * reach - 1);
+  const strength = (blobs.isolation + subtract) * radius * radius;
+  const ballCells = (2 * reach * radius * blobs.resolution) ** 3; // cells each ball touches
+  const most = Math.min(MAX_BALLS, BLOB_BUDGET / ballCells);
+  let spacing = Number(controlsIn.spacing.value) * size; // the Spacing slider, in ball radii
+  while ((arc[n - 1] - arc[0]) / spacing > most) spacing *= 2;
   const addBall = (p, k) => {
     const w = taper(k, n);
     if (w < 0.02) return;
@@ -775,6 +792,19 @@ function build(now) {
   });
 }
 
+// The Grid menu: rebuild each side's metaballs at the new resolution.
+controlsIn.grid.addEventListener('change', () => {
+  const resolution = Number(controlsIn.grid.value);
+  for (const piece of pieces) {
+    const old = piece.blobs;
+    piece.blobs = makeBlobs(old.material, resolution);
+    piece.blobs.visible = old.visible;
+    sculpture.remove(old);
+    old.geometry.dispose();
+    sculpture.add(piece.blobs);
+  }
+});
+
 function applyMaterial() {
   const material = materials[controlsIn.material.value];
   for (const mesh of sculpture.children) if (mesh.isMesh) mesh.material = material;
@@ -787,6 +817,9 @@ function updateControls() {
   $('side-control').hidden = form === 'hemispheres';
   $('thickness-control').hidden = form === 'blobs' || form === 'recurrence';
   $('ball-control').hidden = form !== 'blobs';
+  $('blend-control').hidden = form !== 'blobs';
+  $('spacing-control').hidden = form !== 'blobs';
+  $('grid-control').hidden = form !== 'blobs';
   $('closeness-control').hidden = form !== 'recurrence';
   orbit.autoRotate = controlsIn.rotate.checked;
 }
