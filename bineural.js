@@ -228,7 +228,7 @@ connectButton.addEventListener('click', async () => {
 
 // Views:
 // - 2D: each side's forehead channel (x) against its ear channel (y).
-// - 3D x, y, x delayed: each side's x, y and x a moment earlier, which opens a mixture of
+// - 3D x, y, x (or y) delayed: each side's x, y and x (or y) a moment earlier, which opens a mixture of
 //   rhythms out into a 3D shape; a single pure rhythm stays a flat loop.
 // - 3D Takens embeddings: one signal per side (x - y, or (x + y) / 2)
 //   against itself tau and 2 tau earlier.
@@ -244,7 +244,7 @@ const delaySelect = document.getElementById('delay');
 const overlayCheckbox = document.getElementById('overlay');
 const overlayCanvas = document.getElementById('overlay-plot');
 const overlay = { canvas: overlayCanvas, ctx: overlayCanvas.getContext('2d') };
-const DELAY_VIEWS = new Set(['delay', 'takens', 'takensSum']);
+const DELAY_VIEWS = new Set(['delay', 'delayY', 'takens', 'takensSum']);
 const DELAY_SAMPLES = EEG_SAMPLE_RATE / 10 / 4; // quarter of an alpha period, the starting guess
 
 // The delay in samples for the Delay setting: a band's frequency in Hz, or 'auto'.
@@ -475,6 +475,7 @@ function readAt(ring, t) {
 // One side's trace in any per-side view:
 // - 2d: (x, y)
 // - delay: (x, y, x tau earlier)
+// - delayY: (x, y, y tau earlier)
 // - takens: (s, s tau earlier, s 2 tau earlier) for the side's single bipolar signal
 //   s = (x - y) / sqrt 2, a proper delay embedding of one measurement
 // - takensSum: the same for the side's average, s = (x + y) / 2, the activity the forehead
@@ -501,6 +502,10 @@ function drawSide(target, p, view, scale, trail, project, now) {
     const tau = delay((i) => cx.display[i % RING]);
     lookback = Math.ceil(tau);
     point = (i) => [norm(x(i)), norm(y(i)), norm(x(i - tau))];
+  } else if (view === 'delayY') {
+    const tau = delay((i) => cy.display[i % RING]);
+    lookback = Math.ceil(tau);
+    point = (i) => [norm(x(i)), norm(y(i)), norm(y(i - tau))];
   } else if (view === 'takens') {
     const s = (t) => (x(t) - y(t)) / Math.SQRT2;
     const tau = delay((i) => (cx.display[i % RING] - cy.display[i % RING]) / Math.SQRT2);

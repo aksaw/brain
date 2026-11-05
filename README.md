@@ -30,7 +30,7 @@ another.
 - `bineural.js` – the x-y plots: filters each channel and pairs samples by packet sequence number.
   Also feeds the sound each side's trace, AF7/TP9 to the left ear and AF8/TP10 to the right.
   The plots pass a 15 Hz low-pass to smooth the traces; the sound does not, so it keeps
-  the full EEG band. Views: 2D; 3D x, y, x delayed by τ; 3D Takens embeddings (one signal
+  the full EEG band. Views: 2D; 3D x, y, x delayed by τ; 3D x, y, y delayed by τ; 3D Takens embeddings (one signal
   per side against itself τ and 2τ earlier, for the bipolar x − y or the average
   (x + y)/2); 3D PCA (all four channels on their three principal components). For
   the delay views the Delay setting picks τ: a quarter period of a band's typical
