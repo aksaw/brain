@@ -1,8 +1,9 @@
-// Sculpture: each side's 3D trace (the delay embeddings from Bineural) built as solid
-// geometry with real materials, in a dark gallery: a tube swept along the trail, or a
-// shell lofted between two curves.
+// Sculpture: each side's 3D trace (the delay embeddings from Bineural) built as geometry
+// with real materials, floating in black: a tube swept along the trail, a shell lofted
+// between the two hemispheres' curves, a metaball shrink-wrap, or recurrence threads.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { MarchingCubes } from 'three/addons/objects/MarchingCubes.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
@@ -14,7 +15,6 @@ const RADIAL = 16; // sides of the tube's cross-section
 const ACROSS = 6; // strips across a shell
 const TAPER = 0.3; // the oldest part of the trail (this fraction) tapers to nothing
 const RIM = 0.35; // a shell's edge tubes, as a fraction of the thickness
-const TEXTURE_SAMPLES = 128; // samples of the trail per repeat of the material's texture
 
 const $ = (id) => document.getElementById(id);
 const connectButton = $('connect');
@@ -27,6 +27,8 @@ const controlsIn = {
   side: $('side'),
   material: $('material'),
   thickness: $('thickness'),
+  ballSize: $('ball-size'),
+  closeness: $('closeness'),
   rotate: $('rotate'),
   freeze: $('freeze'),
 };
@@ -230,7 +232,8 @@ class Shell {
     this.mesh.frustumCulled = false;
   }
 
-  update(a, b, u, count) {
+  // u: texture coordinate along, per row; spans: texture repeats across, per row.
+  update(a, b, u, spans, count) {
     const { positions, normals, uvs } = this;
     const rowSize = ACROSS + 1;
     const at = (arr, k) => [arr[3 * k], arr[3 * k + 1], arr[3 * k + 2]];
@@ -256,7 +259,7 @@ class Shell {
         positions.set(point, v);
         normals.set(normal, v);
         uvs[(k * rowSize + j) * 2] = u[k];
-        uvs[(k * rowSize + j) * 2 + 1] = f;
+        uvs[(k * rowSize + j) * 2 + 1] = f * spans[k];
       }
     }
     const geometry = this.mesh.geometry;
@@ -329,10 +332,11 @@ function makeMaterials() {
     return [c, c * 0.985, c * 0.965];
   });
   marble.colorSpace = THREE.SRGBColorSpace;
+  marble.repeat.set(0.3, 1); // broad veins: one repeat spans about three tube-widths along
   // Concrete: fine grain and pits, used for both colour and bump.
   const concrete = fbmTexture(512, 7, (n) => {
-    const pit = n < 0.28 ? 0.55 : 1;
-    const c = (120 + 90 * n) * pit;
+    const pit = Math.random() < 0.015 ? 0.55 : 1; // small scattered air holes
+    const c = (112 + 80 * n) * pit;
     return [c, c * 0.98, c * 0.95];
   });
   concrete.colorSpace = THREE.SRGBColorSpace;
@@ -340,6 +344,12 @@ function makeMaterials() {
   const patina = fbmTexture(256, 5, (n) => {
     const c = 80 + 140 * n;
     return [c, c, c];
+  });
+
+  // White stone: plain colour; only a fine, even grain in the surface (bump), no pattern.
+  const grain = fbmTexture(512, 3, (n) => {
+    const v = 255 * (0.5 + 0.4 * (Math.random() - 0.5) + 0.1 * (n - 0.5));
+    return [v, v, v];
   });
 
   const side = THREE.DoubleSide; // shells are seen from both faces
@@ -350,9 +360,17 @@ function makeMaterials() {
     bronze: new THREE.MeshPhysicalMaterial({
       color: 0xb4804a, metalness: 1, roughness: 0.38, roughnessMap: patina, side,
     }),
+    // The same cast finish as bronze, in a white metal.
+    whiteBronze: new THREE.MeshPhysicalMaterial({
+      color: 0xe4e4e4, metalness: 1, roughness: 0.38, roughnessMap: patina, side,
+    }),
     chrome: new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 1, roughness: 0.04, side }),
     concrete: new THREE.MeshStandardMaterial({
-      map: concrete, bumpMap: concrete, bumpScale: 2, roughness: 0.95, side,
+      map: concrete, bumpMap: concrete, bumpScale: 1, roughness: 0.95, side,
+    }),
+    // Matte white stone, like limestone or plaster: no gloss, no pattern.
+    stone: new THREE.MeshStandardMaterial({
+      color: 0xe9e7e2, roughness: 0.92, bumpMap: grain, bumpScale: 0.4, side,
     }),
   };
 }
@@ -403,7 +421,7 @@ scene.add(sculpture);
 
 // At zero thickness the tube becomes a bare line, in the material's colour, fading in
 // over the trail's oldest part as the tube tapers.
-const LINE_COLORS = { marble: 0xf0ece4, bronze: 0xc89058, chrome: 0xffffff, concrete: 0xa09c95 };
+const LINE_COLORS = { marble: 0xf0ece4, bronze: 0xc89058, whiteBronze: 0xe6e6e6, chrome: 0xffffff, concrete: 0xa09c95, stone: 0xe9e7e2 };
 const lineMaterial = new THREE.LineBasicMaterial({ vertexColors: true });
 
 class Line {
@@ -432,8 +450,68 @@ class Line {
   }
 }
 
-// One set of pieces per side: a tube and its rounded head (or a line), and a shell with
-// its two rims.
+// Separate straight lines (threads), each end with its own brightness, in the material's
+// line colour.
+const MAX_SEGMENTS = 4096;
+
+class Segments {
+  constructor() {
+    this.positions = new Float32Array(MAX_SEGMENTS * 6);
+    this.colors = new Float32Array(MAX_SEGMENTS * 6);
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3).setUsage(THREE.DynamicDrawUsage));
+    geometry.setAttribute('color', new THREE.BufferAttribute(this.colors, 3).setUsage(THREE.DynamicDrawUsage));
+    geometry.setDrawRange(0, 0);
+    this.mesh = new THREE.LineSegments(geometry, lineMaterial);
+    this.mesh.frustumCulled = false;
+    this.count = 0;
+  }
+
+  begin(color) {
+    this.count = 0;
+    this.color = color;
+  }
+
+  get full() {
+    return this.count >= MAX_SEGMENTS;
+  }
+
+  add(a, b, fadeA = 1, fadeB = 1) {
+    if (this.full) return;
+    const { r, g, b: blue } = this.color;
+    const at = this.count * 6;
+    this.positions.set(a, at);
+    this.positions.set(b, at + 3);
+    this.colors.set([r * fadeA, g * fadeA, blue * fadeA, r * fadeB, g * fadeB, blue * fadeB], at);
+    this.count++;
+  }
+
+  end() {
+    const geometry = this.mesh.geometry;
+    geometry.setDrawRange(0, this.count * 2);
+    geometry.attributes.position.needsUpdate = true;
+    geometry.attributes.color.needsUpdate = true;
+    this.mesh.visible = this.count > 0;
+  }
+}
+
+// Metaballs: a field of soft balls along the trail whose surface (marching cubes) fuses
+// wherever the trail passes close to itself. The field spans ±BLOB_SPAN plot radii.
+const BLOB_RESOLUTION = 40;
+const BLOB_SPAN = 1.4;
+const MAX_BALLS = 400;
+
+function makeBlobs(material) {
+  const blobs = new MarchingCubes(BLOB_RESOLUTION, material, true, false, 40000);
+  blobs.scale.setScalar(BLOB_SPAN);
+  blobs.castShadow = true;
+  blobs.receiveShadow = true;
+  blobs.frustumCulled = false;
+  return blobs;
+}
+
+// One set of pieces per side: a tube and its rounded head (or a line), a shell with its
+// two rims, line segments, and metaballs.
 const pieces = SIDES.map(() => {
   const tube = new Tube(materials.marble);
   const head = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), materials.marble);
@@ -441,11 +519,13 @@ const pieces = SIDES.map(() => {
   const line = new Line();
   const shell = new Shell(materials.marble);
   const rims = [new Tube(materials.marble), new Tube(materials.marble)];
-  for (const mesh of [tube.mesh, head, line.mesh, shell.mesh, ...rims.map((r) => r.mesh)]) sculpture.add(mesh);
-  return { tube, head, line, shell, rims };
-});
-
-new ResizeObserver(() => {
+  const segments = new Segments();
+  const blobs = makeBlobs(materials.marble);
+  for (const mesh of [tube.mesh, head, line.mesh, shell.mesh, ...rims.map((r) => r.mesh), segments.mesh, blobs]) {
+    sculpture.add(mesh);
+  }
+  return { tube, head, line, shell, rims, segments, blobs };
+});new ResizeObserver(() => {
   const { clientWidth: w, clientHeight: h } = stage;
   renderer.setSize(w, h);
   camera.aspect = w / Math.max(1, h);
@@ -459,6 +539,8 @@ const scratch = {
   b: new Float32Array(MAX_POINTS * 3),
   radii: new Float32Array(MAX_POINTS),
   u: new Float32Array(MAX_POINTS),
+  shellU: new Float32Array(MAX_POINTS),
+  width: new Float32Array(MAX_POINTS),
 };
 const rimScratch = [new Float32Array(MAX_POINTS * 3), new Float32Array(MAX_POINTS * 3)];
 
@@ -469,11 +551,45 @@ function hideAll() {
     piece.line.mesh.visible = false;
     piece.shell.mesh.visible = false;
     for (const r of piece.rims) r.mesh.visible = false;
+    piece.segments.mesh.visible = false;
+    piece.blobs.visible = false;
   }
 }
 
-// Texture coordinate along the trail, tied to the data so the material doesn't slide.
-const along = (i) => (i % (TEXTURE_SAMPLES * 1024)) / TEXTURE_SAMPLES;
+// Distance along a curve, for texture coordinates that keep the material's grain the same
+// size along a form as across it (so it isn't stretched into streaks). Distances are
+// anchored to the data: each frame starts from the distance a sample already had last
+// frame, so the material stays put on the form instead of sliding as the trail advances.
+class ArcLength {
+  constructor() {
+    this.previous = new Map(); // sample index -> distance
+  }
+
+  // Writes the distance of each of the n points (flat [x, y, z, ...]) into out.
+  measure(samples, points, n, out) {
+    out[0] = 0;
+    for (let k = 1; k < n; k++) {
+      const [dx, dy, dz] = [0, 1, 2].map((c) => points[3 * k + c] - points[3 * (k - 1) + c]);
+      out[k] = out[k - 1] + Math.hypot(dx, dy, dz);
+    }
+    let offset = 0;
+    for (let k = 0; k < n; k++) {
+      if (this.previous.has(samples[k])) {
+        offset = this.previous.get(samples[k]) - out[k];
+        break;
+      }
+    }
+    offset -= Math.floor(offset / 4096) * 4096; // keep numbers small; textures repeat
+    const next = new Map();
+    for (let k = 0; k < n; k++) {
+      out[k] += offset;
+      next.set(samples[k], out[k]);
+    }
+    this.previous = next;
+  }
+}
+
+const SHELL_TILE = 0.6; // a shell's texture repeats every this many plot radii
 
 function buildTube(piece, curve, trail, thickness) {
   const start = Math.max(curve.end - trail, curve.first + Math.ceil(curve.lookback));
@@ -483,8 +599,11 @@ function buildTube(piece, curve, trail, thickness) {
   samples.forEach((i, k) => {
     scratch.a.set(curve.at(i), 3 * k);
     scratch.radii[k] = thickness * taper(k, n);
-    scratch.u[k] = along(i);
   });
+  // One texture repeat around the tube, and the same distance per repeat along it.
+  piece.arcs ??= { tube: new ArcLength(), shell: new ArcLength() };
+  piece.arcs.tube.measure(samples, scratch.a, n, scratch.u);
+  if (thickness > 0) for (let k = 0; k < n; k++) scratch.u[k] /= 2 * Math.PI * thickness;
   if (thickness === 0) {
     samples.forEach((_, k) => (scratch.radii[k] = taper(k, n)));
     piece.line.update(scratch.a, scratch.radii, new THREE.Color(LINE_COLORS[controlsIn.material.value]), n);
@@ -513,17 +632,118 @@ function buildShell(piece, samples, aAt, bAt, thickness) {
       scratch.b[3 * k + c] = mid + (q[c] - mid) * w;
     }
     scratch.radii[k] = RIM * thickness * w;
-    scratch.u[k] = along(i);
+    // The shell's midline, for measuring distance along it; and its width.
+    for (let c = 0; c < 3; c++) rimScratch[0][3 * k + c] = (scratch.a[3 * k + c] + scratch.b[3 * k + c]) / 2;
+    scratch.width[k] = Math.hypot(...[0, 1, 2].map((c) => scratch.b[3 * k + c] - scratch.a[3 * k + c]));
   });
-  piece.shell.update(scratch.a, scratch.b, scratch.u, n);
+  piece.arcs ??= { tube: new ArcLength(), shell: new ArcLength() };
+  piece.arcs.shell.measure(samples, rimScratch[0], n, scratch.u);
+  for (let k = 0; k < n; k++) {
+    scratch.shellU[k] = scratch.u[k] / SHELL_TILE;
+    scratch.width[k] /= SHELL_TILE;
+  }
+  piece.shell.update(scratch.a, scratch.b, scratch.shellU, scratch.width, n);
   piece.shell.mesh.visible = true;
   if (thickness === 0) return;
+  for (let k = 0; k < n; k++) scratch.u[k] /= 2 * Math.PI * RIM * thickness;
   rimScratch[0].set(scratch.a.subarray(0, 3 * n));
   rimScratch[1].set(scratch.b.subarray(0, 3 * n));
   piece.rims.forEach((r, e) => {
     r.update(rimScratch[e], scratch.radii, scratch.u, n);
     r.mesh.visible = true;
   });
+}
+
+// ---- Forms from the trail's points ---------------------------------------------------
+
+// The trail's points (into scratch.a) and their sample indices, or null before data.
+function trailPoints(curve, trail) {
+  const start = Math.max(curve.end - trail, curve.first + Math.ceil(curve.lookback));
+  if (curve.end - start < 4) return null;
+  const samples = trailSamples(start, curve.end);
+  samples.forEach((i, k) => scratch.a.set(curve.at(i), 3 * k));
+  return samples;
+}
+
+const pointAt = (k) => [scratch.a[3 * k], scratch.a[3 * k + 1], scratch.a[3 * k + 2]];
+const lineColor = () => new THREE.Color(LINE_COLORS[controlsIn.material.value]);
+
+// The trail itself as a thin line, fading in over its oldest part.
+function drawTrailLine(piece, n) {
+  for (let k = 0; k < n; k++) scratch.radii[k] = taper(k, n);
+  piece.line.update(scratch.a, scratch.radii, lineColor(), n);
+  piece.line.mesh.visible = true;
+}
+
+// Shrink-wrap: metaballs along the trail, fusing into one skin where it passes close to
+// itself. The Ball size slider sets their radius (plot radii); they shrink over the
+// trail's oldest part. Balls are spaced evenly by distance along the curve (three
+// quarters of a ball radius apart, so they always fuse), at multiples of that distance as measured by the
+// anchored ArcLength, so they stay put on the curve as it advances instead of sliding.
+// Past MAX_BALLS the spacing doubles (keeping every other ball), rather than changing
+// smoothly, which would make every ball shift.
+function buildBlobs(piece, curve, trail) {
+  const samples = trailPoints(curve, trail);
+  if (!samples) return;
+  const n = samples.length;
+  piece.arcs ??= { tube: new ArcLength(), shell: new ArcLength() };
+  piece.arcs.blobs ??= new ArcLength();
+  const arc = scratch.u;
+  piece.arcs.blobs.measure(samples, scratch.a, n, arc);
+
+  const blobs = piece.blobs;
+  const size = Number(controlsIn.ballSize.value);
+  const radius = size / (2 * BLOB_SPAN); // in the field's 0..1 units
+  // Each ball's field reaches about 1.9 radii (set by `subtract`): enough to fuse with its
+  // neighbours, short enough that big balls stay cheap to compute.
+  const subtract = 30;
+  const strength = (blobs.isolation + subtract) * radius * radius; // one ball's surface at radius
+  let spacing = 0.75 * size;
+  while ((arc[n - 1] - arc[0]) / spacing > MAX_BALLS) spacing *= 2;
+  const addBall = (p, k) => {
+    const w = taper(k, n);
+    if (w < 0.02) return;
+    const [x, y, z] = p.map((v) => (v / BLOB_SPAN + 1) / 2);
+    blobs.addBall(x, y, z, strength * w, subtract);
+  };
+  blobs.reset();
+  for (let k = 1; k < n; k++) {
+    const [a, b] = [arc[k - 1], arc[k]];
+    if (b <= a) continue;
+    const [p, q] = [pointAt(k - 1), pointAt(k)];
+    for (let m = Math.ceil(a / spacing) * spacing; m < b; m += spacing) {
+      const f = (m - a) / (b - a);
+      addBall([0, 1, 2].map((c) => p[c] + f * (q[c] - p[c])), k - 1 + f);
+    }
+  }
+  addBall(pointAt(n - 1), n - 1); // the head
+  blobs.update();
+  blobs.visible = true;
+}
+
+// Recurrence threads: a thread wherever the trajectory comes back close to where it was
+// at least half a cycle earlier (a recurrence plot, made physical). A steady rhythm laces
+// its loops together; changing activity leaves few threads. How close counts as a return
+// is the Closeness slider (plot radii).
+function buildRecurrence(piece, curve, trail) {
+  const samples = trailPoints(curve, trail);
+  if (!samples) return;
+  const n = samples.length;
+  const step = n > 2 ? samples[1] - samples[0] : 1;
+  const apart = Math.max(3, Math.ceil((2 * curve.tau) / step)); // half a cycle, in grid points
+  const r2 = Number(controlsIn.closeness.value) ** 2;
+  const p = scratch.a;
+  drawTrailLine(piece, n);
+  piece.segments.begin(lineColor());
+  for (let k = n - 1; k >= 0 && !piece.segments.full; k--) {
+    for (let j = k - apart; j >= 0; j--) {
+      const dx = p[3 * k] - p[3 * j];
+      const dy = p[3 * k + 1] - p[3 * j + 1];
+      const dz = p[3 * k + 2] - p[3 * j + 2];
+      if (dx * dx + dy * dy + dz * dz < r2) piece.segments.add(pointAt(k), pointAt(j), taper(k, n), taper(j, n));
+    }
+  }
+  piece.segments.end();
 }
 
 function build(now) {
@@ -549,17 +769,9 @@ function build(now) {
   SIDES.forEach((side, s) => {
     const curve = curves[s];
     if (!curve || (sideChoice !== 'both' && sideChoice !== side.name)) return;
-    if (form === 'tube') {
-      buildTube(pieces[s], curve, trail, thickness);
-    } else {
-      // Loops: each point joined to where the curve was one period earlier (four of the
-      // quarter-period delays), so successive turns of a rhythm are spanned by a surface.
-      const period = 4 * curve.tau;
-      const first = curve.first + curve.lookback + period;
-      const start = Math.max(curve.end - trail, Math.ceil(first));
-      if (curve.end - start < 3) return;
-      buildShell(pieces[s], trailSamples(start, curve.end), curve.at, (i) => curve.at(i - period), thickness);
-    }
+    if (form === 'tube') buildTube(pieces[s], curve, trail, thickness);
+    else if (form === 'blobs') buildBlobs(pieces[s], curve, trail);
+    else if (form === 'recurrence') buildRecurrence(pieces[s], curve, trail);
   });
 }
 
@@ -571,7 +783,11 @@ controlsIn.material.addEventListener('change', applyMaterial);
 applyMaterial();
 
 function updateControls() {
-  $('side-control').hidden = controlsIn.form.value === 'hemispheres';
+  const form = controlsIn.form.value;
+  $('side-control').hidden = form === 'hemispheres';
+  $('thickness-control').hidden = form === 'blobs' || form === 'recurrence';
+  $('ball-control').hidden = form !== 'blobs';
+  $('closeness-control').hidden = form !== 'recurrence';
   orbit.autoRotate = controlsIn.rotate.checked;
 }
 controlsIn.form.addEventListener('change', updateControls);
@@ -589,31 +805,33 @@ requestAnimationFrame(frame);
 
 // ---- Saving ------------------------------------------------------------------------
 
-// A copy of the visible sculpture with only the drawn part of each mesh, for export.
+// A copy of the visible sculpture with only the drawn part of each object, for export.
 // Lines go into .glb only; .stl holds surfaces alone.
 function snapshot() {
   const group = new THREE.Group();
-  for (const mesh of sculpture.children) {
-    if (!mesh.visible) continue;
-    if (mesh.isLine) {
-      const { count } = mesh.geometry.drawRange;
-      const geometry = new THREE.BufferGeometry();
-      for (const name of ['position', 'color']) {
-        geometry.setAttribute(name, new THREE.BufferAttribute(mesh.geometry.attributes[name].array.slice(0, 3 * count), 3));
+  for (const object of sculpture.children) {
+    if (!object.visible) continue;
+    const source = object.geometry;
+    const { count } = source.drawRange;
+    const geometry = new THREE.BufferGeometry();
+    if (source.index) {
+      const used = Number.isFinite(count) ? count : source.index.count;
+      if (used === 0) continue;
+      geometry.setIndex(new THREE.BufferAttribute(source.index.array.slice(0, used), 1));
+      for (const [name, attribute] of Object.entries(source.attributes)) geometry.setAttribute(name, attribute.clone());
+    } else {
+      const used = Number.isFinite(count) ? count : source.attributes.position.count;
+      if (used === 0) continue;
+      for (const [name, attribute] of Object.entries(source.attributes)) {
+        const size = attribute.itemSize;
+        geometry.setAttribute(name, new THREE.BufferAttribute(attribute.array.slice(0, used * size), size));
       }
-      group.add(new THREE.Line(geometry, mesh.material));
-      continue;
     }
-    const geometry = mesh.geometry.clone();
-    const { count } = mesh.geometry.drawRange;
-    if (geometry.index && Number.isFinite(count)) {
-      if (count === 0) continue;
-      geometry.setIndex(new THREE.BufferAttribute(geometry.index.array.slice(0, count), 1));
-    }
-    geometry.setDrawRange(0, Infinity);
-    const copy = new THREE.Mesh(geometry, mesh.material);
-    copy.position.copy(mesh.position);
-    copy.scale.copy(mesh.scale);
+    const Kind = object.isLineSegments ? THREE.LineSegments : object.isLine ? THREE.Line : THREE.Mesh;
+    const copy = new Kind(geometry, object.material);
+    copy.position.copy(object.position);
+    copy.quaternion.copy(object.quaternion);
+    copy.scale.copy(object.scale);
     group.add(copy);
   }
   return group;

@@ -41,15 +41,22 @@ another.
   perspective and turned by the Motion setting: auto-rotate, mouse drag, or head movement
   from the headband's gyroscope (integrated, drift-corrected, amplified 3×). Overlay puts
   both hemispheres in one plot, drawn additively.
-- `sculpture.js` – the sculpture page (Three.js). Forms: a tube swept along each side's
-  trail, tapering to nothing at its oldest end; a shell lofted between each point and where
-  the curve was one period (four delays) earlier, spanning successive loops; or a shell
-  lofted between the left and right hemispheres' curves, with tubes along the edges.
-  Thickness None leaves a shell as bare surface and turns the tube into a plain line.
-  Materials: marble, bronze, chrome, concrete (procedural textures tied to the data, so
-  they don't slide). Orbit with the mouse; Freeze holds the current form; Save writes the
-  visible sculpture as .glb or .stl (.stl holds surfaces only, not lines; the tube is a closed solid; shells have no thickness,
-  so they need thickening before printing).
+- `sculpture.js` – the sculpture page (Three.js). Forms:
+  - tube: swept along each side's trail, tapering to nothing at its oldest end (thickness
+    None: a plain line);
+  - shell between hemispheres: lofted between the left and right curves, with tubes along
+    the edges (None: bare surface);
+  - shrink-wrap: metaballs spaced evenly along the trail, fusing where it passes close to
+    itself; the Ball size slider sets their radius live;
+  - recurrence threads: a thread wherever the trajectory returns close to where it was at
+    least half a cycle earlier (a recurrence plot in 3D); the Closeness slider sets how
+    close counts, live.
+  Materials: marble, bronze, white bronze, chrome, concrete, white stone (matte,
+  unpatterned). Textures are laid out by distance along the form, so they aren't
+  stretched, and anchored to the data, so they don't slide. Orbit with the mouse; Freeze
+  holds the current form; Save writes the visible sculpture as .glb or .stl (.stl holds
+  surfaces only, not lines; tube and shrink-wrap are closed solids; the shell has no
+  thickness, so it needs thickening before printing).
 - `eeg-stream.js` – the filtered stream, delay embeddings and automatic delay used by the
   sculpture page.
 - `sonify-worklet.js` – audio-thread processor that turns the two traces into stereo sound.

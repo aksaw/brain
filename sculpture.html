@@ -27,6 +27,7 @@
     #stage canvas { display: block; }
     header a { color: var(--muted); margin-left: auto; }
     header label[hidden] { display: none; }
+    header input[type='range'] { accent-color: var(--accent); vertical-align: middle; }
   </style>
   <script type="importmap">
     {
@@ -63,8 +64,9 @@
       Form
       <select id="form">
         <option value="tube">Tube</option>
-        <option value="loops">Shell between successive loops</option>
         <option value="hemispheres">Shell between hemispheres</option>
+        <option value="blobs">Shrink-wrap (metaballs)</option>
+        <option value="recurrence">Recurrence threads</option>
       </select>
     </label>
     <label>
@@ -101,11 +103,22 @@
       <select id="material">
         <option value="marble">Marble</option>
         <option value="bronze">Bronze</option>
+        <option value="whiteBronze">White bronze</option>
         <option value="chrome">Chrome</option>
         <option value="concrete">Concrete</option>
+        <option value="stone">White stone</option>
       </select>
     </label>
-    <label>
+    <!-- Live sliders: each shows only for its form. -->
+    <label id="ball-control" hidden>
+      Ball size
+      <input type="range" id="ball-size" min="0.04" max="0.4" step="0.01" value="0.15">
+    </label>
+    <label id="closeness-control" hidden>
+      Closeness
+      <input type="range" id="closeness" min="0.02" max="0.3" step="0.01" value="0.12">
+    </label>
+    <label id="thickness-control">
       Thickness
       <select id="thickness">
         <option value="0">None</option>
