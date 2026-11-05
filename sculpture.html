@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sculpture</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    /* The 3D stage fills the space below the header. */
+    body {
+      background: #000;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      box-sizing: border-box;
+    }
+
+    #stage {
+      flex: 1;
+      min-height: 0;
+      position: relative;
+      cursor: grab;
+      touch-action: none;
+    }
+
+    #stage:active { cursor: grabbing; }
+    #stage canvas { display: block; }
+    header a { color: var(--muted); margin-left: auto; }
+    header label[hidden] { display: none; }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <header>
+    <button id="connect">Connect</button>
+    <label>
+      Scale
+      <select id="scale">
+        <option value="50" selected>±50 µV</option>
+        <option value="100">±100 µV</option>
+        <option value="200">±200 µV</option>
+        <option value="500">±500 µV</option>
+      </select>
+    </label>
+    <label>
+      Trail
+      <select id="trail">
+        <option value="0.5">0.5 s</option>
+        <option value="1">1 s</option>
+        <option value="2" selected>2 s</option>
+        <option value="4">4 s</option>
+        <option value="8">8 s</option>
+      </select>
+    </label>
+    <label>
+      Form
+      <select id="form">
+        <option value="tube">Tube</option>
+        <option value="loops">Shell between successive loops</option>
+        <option value="hemispheres">Shell between hemispheres</option>
+      </select>
+    </label>
+    <label>
+      Curve
+      <select id="curve">
+        <option value="xyx">x, y, x delayed</option>
+        <option value="xyy">x, y, y delayed</option>
+        <option value="diff">Takens of x − y</option>
+        <option value="sum">Takens of x + y</option>
+      </select>
+    </label>
+    <!-- Each band's delay is a quarter period of its typical frequency. -->
+    <label>
+      Delay
+      <select id="delay">
+        <option value="auto" selected>Auto</option>
+        <option value="2">Delta, 2 Hz (125 ms)</option>
+        <option value="6">Theta, 6 Hz (42 ms)</option>
+        <option value="10">Alpha, 10 Hz (25 ms)</option>
+        <option value="20">Beta, 20 Hz (12.5 ms)</option>
+        <option value="40">Gamma, 40 Hz (6.25 ms)</option>
+      </select>
+    </label>
+    <label id="side-control">
+      Side
+      <select id="side">
+        <option value="both">Both</option>
+        <option value="left">Left</option>
+        <option value="right">Right</option>
+      </select>
+    </label>
+    <label>
+      Material
+      <select id="material">
+        <option value="marble">Marble</option>
+        <option value="bronze">Bronze</option>
+        <option value="chrome">Chrome</option>
+        <option value="concrete">Concrete</option>
+      </select>
+    </label>
+    <label>
+      Thickness
+      <select id="thickness">
+        <option value="0">None</option>
+        <option value="0.02">Thin</option>
+        <option value="0.04" selected>Medium</option>
+        <option value="0.07">Thick</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="rotate" checked> Rotate</label>
+    <label><input type="checkbox" id="freeze"> Freeze</label>
+    <button id="save-glb">Save .glb</button>
+    <button id="save-stl">Save .stl</button>
+    <a href="bineural.html">Bineural</a>
+  </header>
+
+  <p id="unsupported" hidden>
+    Web Bluetooth isn't available here. Use Chrome or Edge, and serve this page from
+    <code>localhost</code> or HTTPS.
+  </p>
+
+  <div id="stage" role="img" aria-label="The EEG trace as a 3D sculpture"></div>
+
+  <script type="module" src="sculpture.js"></script>
+</body>
+</html>

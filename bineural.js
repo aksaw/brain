@@ -466,10 +466,12 @@ function autoDelay(key, signal, end, first, now) {
 }
 
 // A ring-buffer read at a fractional sample index, by linear interpolation.
+// Indices before the first sample (rounding can land a hair below it) read as 0.
 function readAt(ring, t) {
   const i = Math.floor(t);
   const f = t - i;
-  return ring[i % RING] * (1 - f) + ring[(i + 1) % RING] * f;
+  const at = (k) => (k < 0 ? 0 : ring[k % RING]);
+  return at(i) * (1 - f) + at(i + 1) * f;
 }
 
 // One side's trace in any per-side view:

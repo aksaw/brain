@@ -19,6 +19,8 @@ headband, and click **Connect**:
 - http://localhost:8000/dashboard.html – traces, contact quality, band powers and artifacts.
 - http://localhost:8000/bineural.html – two parametric (x-y) plots, one per side of the head:
   AF7 against TP9 and AF8 against TP10, after the 1 Hz high-pass and 60 Hz notch.
+- http://localhost:8000/sculpture.html – Bineural's 3D curves built as solid sculpture in a
+  black space. Needs an internet connection the first time, for Three.js from a CDN.
 
 The headband accepts one connection at a time, so disconnect one page before connecting
 another.
@@ -39,6 +41,17 @@ another.
   perspective and turned by the Motion setting: auto-rotate, mouse drag, or head movement
   from the headband's gyroscope (integrated, drift-corrected, amplified 3×). Overlay puts
   both hemispheres in one plot, drawn additively.
+- `sculpture.js` – the sculpture page (Three.js). Forms: a tube swept along each side's
+  trail, tapering to nothing at its oldest end; a shell lofted between each point and where
+  the curve was one period (four delays) earlier, spanning successive loops; or a shell
+  lofted between the left and right hemispheres' curves, with tubes along the edges.
+  Thickness None leaves a shell as bare surface and turns the tube into a plain line.
+  Materials: marble, bronze, chrome, concrete (procedural textures tied to the data, so
+  they don't slide). Orbit with the mouse; Freeze holds the current form; Save writes the
+  visible sculpture as .glb or .stl (.stl holds surfaces only, not lines; the tube is a closed solid; shells have no thickness,
+  so they need thickening before printing).
+- `eeg-stream.js` – the filtered stream, delay embeddings and automatic delay used by the
+  sculpture page.
 - `sonify-worklet.js` – audio-thread processor that turns the two traces into stereo sound.
 - `sonify-core.js` – the sound modes. Except for granular, they treat each side's point as
   a complex signal z = x + iy, so the direction the trace turns is audible:
