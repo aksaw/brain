@@ -31,6 +31,8 @@
     }
 
     .xy figure[hidden] { display: none; }
+    .xy.draggable { cursor: grab; touch-action: none; }
+    .xy.dragging { cursor: grabbing; }
 
     /* The overlay holds both hemispheres in one, larger plot. */
     .xy #overlay-figure { width: min(100%, 92vw, 80vh); }
@@ -72,7 +74,37 @@
         <option value="2">2 s</option>
       </select>
     </label>
-    <label><input type="checkbox" id="overlay"> Overlay</label>
+    <label>
+      View
+      <select id="view">
+        <option value="2d">2D</option>
+        <option value="delay">3D: x, y, x delayed</option>
+        <option value="takens">3D: Takens embedding of x − y</option>
+        <option value="takensSum">3D: Takens embedding of x + y</option>
+        <option value="pca">3D PCA</option>
+      </select>
+    </label>
+    <!-- Each band's delay is a quarter period of its typical frequency. -->
+    <label id="delay-control" hidden>
+      Delay
+      <select id="delay">
+        <option value="auto" selected>Auto</option>
+        <option value="2">Delta, 2 Hz (125 ms)</option>
+        <option value="6">Theta, 6 Hz (42 ms)</option>
+        <option value="10">Alpha, 10 Hz (25 ms)</option>
+        <option value="20">Beta, 20 Hz (12.5 ms)</option>
+        <option value="40">Gamma, 40 Hz (6.25 ms)</option>
+      </select>
+    </label>
+    <label id="motion-control" hidden>
+      Motion
+      <select id="motion">
+        <option value="spin">Auto-rotate</option>
+        <option value="mouse">Mouse</option>
+        <option value="head">Head</option>
+      </select>
+    </label>
+    <label id="overlay-control"><input type="checkbox" id="overlay"> Overlay</label>
     <label>
       Sound
       <select id="sound">
