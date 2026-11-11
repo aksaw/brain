@@ -118,7 +118,7 @@
     </p>
 
     <h2>Signal</h2>
-    <label>
+    <label id="scale-control">
       Scale
       <select id="scale">
         <option value="50" selected>±50 µV</option>
@@ -127,7 +127,7 @@
         <option value="500">±500 µV</option>
       </select>
     </label>
-    <label>
+    <label id="trail-control">
       Trail
       <select id="trail">
         <option value="0.5">0.5 s</option>
@@ -137,6 +137,19 @@
         <option value="8">8 s</option>
       </select>
     </label>
+    <!-- The alpha curves move over seconds, so their trails are much longer. -->
+    <label id="slow-trail-control" hidden>
+      Trail
+      <select id="slow-trail">
+        <option value="5">5 s</option>
+        <option value="10">10 s</option>
+        <option value="15">15 s</option>
+        <option value="30">30 s</option>
+        <option value="60" selected>1 min</option>
+        <option value="120">2 min</option>
+        <option value="300">5 min</option>
+      </select>
+    </label>
     <label>
       Curve
       <select id="curve">
@@ -144,10 +157,12 @@
         <option value="xyy">x, y, y delayed</option>
         <option value="diff">Takens of x − y</option>
         <option value="sum">Takens of x + y</option>
+        <option value="alphaPeak">Alpha: power, asymmetry, peak frequency</option>
+        <option value="alphaHemi">Alpha per hemisphere: back, front, peak frequency</option>
       </select>
     </label>
     <!-- Each band's delay is a quarter period of its typical frequency. -->
-    <label>
+    <label id="delay-control">
       Delay
       <select id="delay">
         <option value="auto" selected>Auto</option>

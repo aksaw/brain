@@ -63,8 +63,20 @@ another.
   holds the current form; Save writes the visible sculpture as .glb or .stl (.stl holds
   surfaces only, not lines; tube and shrink-wrap are closed solids; the shell has no
   thickness, so it needs thickening before printing).
-- `eeg-stream.js` – the filtered stream, delay embeddings and automatic delay used by the
-  sculpture page.
+- `eeg-stream.js` – the filtered stream (smoothed for the traces, full band for band
+  power), delay embeddings and automatic delay used by the sculpture page.
+- `alpha-features.js` – the slow alpha curves on the sculpture page's Curve menu:
+  - whole head, one curve: x is posterior alpha (relative 8–13 Hz power at TP9/TP10), y
+    is frontal asymmetry (ln alpha AF8 − ln alpha AF7), z is the alpha peak frequency
+    (followed only while alpha is clear); Side and the shell between hemispheres don't
+    apply;
+  - per hemisphere, one curve each from that side's own electrodes: x is back alpha
+    (relative alpha at TP9 or TP10), y is front alpha (AF7 or AF8), z is that side's
+    alpha peak frequency. Both sides share one baseline per axis, so a difference between
+    them is kept: the shell between hemispheres widens where they disagree.
+  Measured 16 times a second over 2 s windows, smoothed over about a second, and scaled
+  against a running one-minute baseline. Their trails run from 5 s to 5 min; Scale and
+  Delay don't apply.
 - `sonify-worklet.js` – audio-thread processor that turns the two traces into stereo sound.
 - `sonify-core.js` – the sound modes. Except for granular, they treat each side's point as
   a complex signal z = x + iy, so the direction the trace turns is audible:

@@ -11,7 +11,8 @@ export const SIDES = [
 
 // Samples are stored by absolute sample index (packet sequence number x 12 + position), so
 // x and y come from the same instant even though each channel arrives in its own packets.
-// Every channel gets a high-pass and mains notch, then a low-pass to smooth the trace.
+// Every channel gets a high-pass and mains notch (kept in `wide`, the full band, for band
+// power), then a low-pass to smooth the trace (kept in `values`).
 export class EegStream {
   constructor({ seconds = 16, highpassHz = 1, mainsHz = 60, lowpassHz = 15 } = {}) {
     this.ring = seconds * EEG_SAMPLE_RATE;
@@ -23,12 +24,9 @@ export class EegStream {
     const rate = EEG_SAMPLE_RATE;
     const { highpassHz, mainsHz, lowpassHz } = this.options;
     this.channels = EEG_CHANNELS.map(() => ({
-      filters: [
-        highpass(highpassHz, rate),
-        notch(mainsHz, rate),
-        lowpass(lowpassHz, rate),
-        lowpass(lowpassHz, rate),
-      ],
+      filters: [highpass(highpassHz, rate), notch(mainsHz, rate)],
+      smoothing: [lowpass(lowpassHz, rate), lowpass(lowpassHz, rate)],
+      wide: new Float32Array(this.ring),
       values: new Float32Array(this.ring),
       first: null, // index of the first sample received
       end: 0, // one past the newest sample index
@@ -43,8 +41,11 @@ export class EegStream {
     c.lastSeq = seq;
     const firstIndex = (c.wraps * 65536 + seq) * EEG_SAMPLES_PER_PACKET;
     samples.forEach((s, k) => {
+      const i = (firstIndex + k) % this.ring;
       for (const filter of c.filters) s = filter.process(s);
-      c.values[(firstIndex + k) % this.ring] = s;
+      c.wide[i] = s;
+      for (const filter of c.smoothing) s = filter.process(s);
+      c.values[i] = s;
     });
     c.first ??= firstIndex;
     c.end = Math.max(c.end, firstIndex + samples.length);

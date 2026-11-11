@@ -9,6 +9,7 @@ import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
 import { Muse, EEG_SAMPLE_RATE } from './muse.js';
 import { EegStream, SIDES, EMBEDDINGS, AutoDelay, bandDelay } from './eeg-stream.js';
+import { AlphaFeatures } from './alpha-features.js';
 
 const MAX_POINTS = 640; // points per curve; longer trails are sampled more sparsely
 const RADIAL = 16; // sides of the tube's cross-section
@@ -21,6 +22,7 @@ const connectButton = $('connect');
 const controlsIn = {
   scale: $('scale'),
   trail: $('trail'),
+  slowTrail: $('slow-trail'),
   form: $('form'),
   curve: $('curve'),
   delay: $('delay'),
@@ -39,6 +41,9 @@ const controlsIn = {
 // ---- Data --------------------------------------------------------------------------
 
 const stream = new EegStream({ seconds: 16 });
+const alpha = new AlphaFeatures(stream);// The slow alpha curves: one whole-head curve, or one per hemisphere.
+const isAlphaCurve = () => controlsIn.curve.value.startsWith('alpha');
+const isWholeHeadCurve = () => controlsIn.curve.value === 'alphaPeak';
 const autoDelays = new Map(); // `${side}:${curve}` -> AutoDelay
 
 let muse = null;
@@ -64,6 +69,7 @@ connectButton.addEventListener('click', async () => {
     return;
   }
   stream.reset();
+  alpha.reset();
   autoDelays.clear();
   const current = new Muse();
   muse = current;
@@ -107,7 +113,7 @@ function sideCurve(side, now) {
   const scale = Number(controlsIn.scale.value);
   const norm = (v) => Math.max(-1, Math.min(1, v / scale));
   const at = (t) => raw(t).map(norm);
-  return { at, tau, lookback: embedding.span * tau, ...range };
+  return { at, tau, lookback: embedding.span * tau, rate: EEG_SAMPLE_RATE, ...range };
 }
 
 // Sample indices along the trail, on a grid tied to the data (so points don't shimmer as
@@ -764,17 +770,26 @@ function buildRecurrence(piece, curve, trail) {
 }
 
 function build(now) {
-  const trail = Math.round(Number(controlsIn.trail.value) * EEG_SAMPLE_RATE);
   const thickness = Number(controlsIn.thickness.value);
   const form = controlsIn.form.value;
   const sideChoice = controlsIn.side.value;
-  const curves = SIDES.map((side) => sideCurve(side, now));
   hideAll();
+
+  // A curve per side ([left, right]); the whole-head alpha curve fills only the first slot.
+  // The alpha curves are sampled FEATURE_RATE times a second and have their own long trails.
+  const wholeHead = isWholeHeadCurve();
+  let curves;
+  if (wholeHead) curves = [alpha.curve(), null];
+  else if (isAlphaCurve()) curves = alpha.hemisphereCurves();
+  else curves = SIDES.map((side) => sideCurve(side, now));
+  const seconds = Number((isAlphaCurve() ? controlsIn.slowTrail : controlsIn.trail).value);
+  const trailOf = (curve) => Math.round(seconds * curve.rate);
 
   if (form === 'hemispheres') {
     // One shell spanning the left curve and the right curve at each instant.
     const [left, right] = curves;
     if (!left || !right) return;
+    const trail = trailOf(left);
     const end = Math.min(left.end, right.end);
     const first = Math.max(left.first + left.lookback, right.first + right.lookback);
     const start = Math.max(end - trail, Math.ceil(first));
@@ -785,7 +800,8 @@ function build(now) {
 
   SIDES.forEach((side, s) => {
     const curve = curves[s];
-    if (!curve || (sideChoice !== 'both' && sideChoice !== side.name)) return;
+    if (!curve || (!wholeHead && sideChoice !== 'both' && sideChoice !== side.name)) return;
+    const trail = trailOf(curve);
     if (form === 'tube') buildTube(pieces[s], curve, trail, thickness);
     else if (form === 'blobs') buildBlobs(pieces[s], curve, trail);
     else if (form === 'recurrence') buildRecurrence(pieces[s], curve, trail);
@@ -838,8 +854,20 @@ try {
 }
 
 function updateControls() {
+  // The alpha curves are already scaled and have no delay, so Scale and Delay don't apply;
+  // they get the long trail menu. The whole-head one has no sides, so neither Side nor the
+  // shell between hemispheres applies to it.
+  const slow = isAlphaCurve();
+  const wholeHead = isWholeHeadCurve();
+  const hemispheres = controlsIn.form.querySelector('option[value="hemispheres"]');
+  hemispheres.disabled = wholeHead;
+  if (wholeHead && controlsIn.form.value === 'hemispheres') controlsIn.form.value = 'tube';
   const form = controlsIn.form.value;
-  $('side-control').hidden = form === 'hemispheres';
+  $('side-control').hidden = form === 'hemispheres' || wholeHead;
+  $('scale-control').hidden = slow;
+  $('delay-control').hidden = slow;
+  $('trail-control').hidden = slow;
+  $('slow-trail-control').hidden = !slow;
   $('thickness-control').hidden = form === 'blobs' || form === 'recurrence';
   $('ball-control').hidden = form !== 'blobs';
   $('blend-control').hidden = form !== 'blobs';
@@ -849,11 +877,13 @@ function updateControls() {
   orbit.autoRotate = controlsIn.rotate.checked;
 }
 controlsIn.form.addEventListener('change', updateControls);
+controlsIn.curve.addEventListener('change', updateControls);
 controlsIn.rotate.addEventListener('change', updateControls);
 updateControls();
 
 function frame() {
   const now = performance.now();
+  alpha.update(); // always, so the alpha history is there when its curves are chosen
   if (!controlsIn.freeze.checked) build(now);
   orbit.update();
   renderer.render(scene, camera);
