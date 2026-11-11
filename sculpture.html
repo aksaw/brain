@@ -6,18 +6,85 @@
   <title>Sculpture</title>
   <link rel="stylesheet" href="style.css">
   <style>
-    /* The 3D stage fills the space below the header. */
+    /* Controls in a collapsible panel on the right; the 3D stage fills the rest. */
     body {
       background: #000;
       display: flex;
-      flex-direction: column;
       height: 100vh;
-      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
     }
+
+    #panel {
+      flex: none;
+      width: 264px;
+      box-sizing: border-box;
+      padding: 16px;
+      overflow-x: hidden;
+      overflow-y: auto;
+      order: 2; /* after the stage */
+      background: #0b0b0b;
+      border-left: 1px solid #1e1e1e;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: width 180ms ease, padding 180ms ease;
+    }
+
+    body.collapsed #panel {
+      width: 0;
+      padding-left: 0;
+      padding-right: 0;
+      border-left: none;
+    }
+
+    /* The toggle stays in the top-right corner whether the panel is open or closed. */
+    #panel-toggle {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 2;
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      line-height: 1;
+      font-size: 16px;
+    }
+
+    #panel .top { display: flex; gap: 8px; margin-right: 42px; }
+    #panel .top button { flex: 1; }
+
+    #panel h2 {
+      margin: 10px 0 0;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    /* Each setting is a row: its name, then its control filling the rest. */
+    #panel label {
+      display: grid;
+      grid-template-columns: 76px minmax(0, 1fr);
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+    }
+
+    #panel label.check { display: flex; }
+    #panel label[hidden] { display: none; }
+    #panel select, #panel input[type='range'] { width: 100%; min-width: 0; box-sizing: border-box; }
+    #panel input { accent-color: var(--accent); }
+    #panel .buttons { display: flex; gap: 8px; }
+    #panel .buttons button { flex: 1; }
+    #panel a { color: var(--muted); margin-top: auto; padding-top: 12px; }
+    #unsupported { margin: 0; white-space: normal; }
 
     #stage {
       flex: 1;
-      min-height: 0;
+      min-width: 0;
       position: relative;
       cursor: grab;
       touch-action: none;
@@ -25,9 +92,11 @@
 
     #stage:active { cursor: grabbing; }
     #stage canvas { display: block; }
-    header a { color: var(--muted); margin-left: auto; }
-    header label[hidden] { display: none; }
-    header input[type='range'] { accent-color: var(--accent); vertical-align: middle; }
+
+    /* On narrow screens the panel floats over the sculpture instead of squeezing it. */
+    @media (max-width: 720px) {
+      #panel { position: absolute; z-index: 1; top: 0; bottom: 0; right: 0; }
+    }
   </style>
   <script type="importmap">
     {
@@ -39,8 +108,16 @@
   </script>
 </head>
 <body>
-  <header>
-    <button id="connect">Connect</button>
+  <button id="panel-toggle" aria-controls="panel" aria-expanded="true" title="Hide settings" aria-label="Hide settings">›</button>
+
+  <aside id="panel" aria-label="Settings">
+    <div class="top"><button id="connect">Connect</button></div>
+    <p id="unsupported" hidden>
+      Web Bluetooth isn't available here. Use Chrome or Edge, and serve this page from
+      <code>localhost</code> or HTTPS.
+    </p>
+
+    <h2>Signal</h2>
     <label>
       Scale
       <select id="scale">
@@ -58,15 +135,6 @@
         <option value="2" selected>2 s</option>
         <option value="4">4 s</option>
         <option value="8">8 s</option>
-      </select>
-    </label>
-    <label>
-      Form
-      <select id="form">
-        <option value="tube">Tube</option>
-        <option value="hemispheres">Shell between hemispheres</option>
-        <option value="blobs">Shrink-wrap (metaballs)</option>
-        <option value="recurrence">Recurrence threads</option>
       </select>
     </label>
     <label>
@@ -98,18 +166,27 @@
         <option value="right">Right</option>
       </select>
     </label>
+
+    <h2>Form</h2>
     <label>
-      Material
-      <select id="material">
-        <option value="marble">Marble</option>
-        <option value="bronze">Bronze</option>
-        <option value="whiteBronze">White bronze</option>
-        <option value="chrome">Chrome</option>
-        <option value="concrete">Concrete</option>
-        <option value="stone">White stone</option>
+      Form
+      <select id="form">
+        <option value="tube">Tube</option>
+        <option value="hemispheres">Shell between hemispheres</option>
+        <option value="blobs">Shrink-wrap (metaballs)</option>
+        <option value="recurrence">Recurrence threads</option>
       </select>
     </label>
-    <!-- Live sliders: each shows only for its form. -->
+    <label id="thickness-control">
+      Thickness
+      <select id="thickness">
+        <option value="0">None</option>
+        <option value="0.02">Thin</option>
+        <option value="0.04" selected>Medium</option>
+        <option value="0.07">Thick</option>
+      </select>
+    </label>
+    <!-- Live controls: each shows only for its form. -->
     <label id="ball-control" hidden>
       Ball size
       <input type="range" id="ball-size" min="0.04" max="0.4" step="0.01" value="0.15">
@@ -139,26 +216,30 @@
       Closeness
       <input type="range" id="closeness" min="0.02" max="0.3" step="0.01" value="0.12">
     </label>
-    <label id="thickness-control">
-      Thickness
-      <select id="thickness">
-        <option value="0">None</option>
-        <option value="0.02">Thin</option>
-        <option value="0.04" selected>Medium</option>
-        <option value="0.07">Thick</option>
+
+    <h2>Look</h2>
+    <label>
+      Material
+      <select id="material">
+        <option value="marble">Marble</option>
+        <option value="bronze">Bronze</option>
+        <option value="whiteBronze">White bronze</option>
+        <option value="chrome">Chrome</option>
+        <option value="concrete">Concrete</option>
+        <option value="stone">White stone</option>
       </select>
     </label>
-    <label><input type="checkbox" id="rotate" checked> Rotate</label>
-    <label><input type="checkbox" id="freeze"> Freeze</label>
-    <button id="save-glb">Save .glb</button>
-    <button id="save-stl">Save .stl</button>
-    <a href="bineural.html">Bineural</a>
-  </header>
+    <label class="check"><input type="checkbox" id="rotate" checked> Rotate</label>
+    <label class="check"><input type="checkbox" id="freeze"> Freeze</label>
 
-  <p id="unsupported" hidden>
-    Web Bluetooth isn't available here. Use Chrome or Edge, and serve this page from
-    <code>localhost</code> or HTTPS.
-  </p>
+<h2>Save</h2>
+    <div class="buttons">
+      <button id="save-glb">Save .glb</button>
+      <button id="save-stl">Save .stl</button>
+    </div>
+
+    <a href="bineural.html">Bineural</a>
+  </aside>
 
   <div id="stage" role="img" aria-label="The EEG trace as a 3D sculpture"></div>
 

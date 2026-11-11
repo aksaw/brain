@@ -57,7 +57,9 @@ another.
     close counts, live.
   Materials: marble, bronze, white bronze, chrome, concrete, white stone (matte,
   unpatterned). Textures are laid out by distance along the form, so they aren't
-  stretched, and anchored to the data, so they don't slide. Orbit with the mouse; Freeze
+  stretched, and anchored to the data, so they don't slide. Settings sit in a panel on the
+  right, grouped into Signal, Form, Look and Save; the button in the top-right corner hides it
+  (remembered between visits). Orbit with the mouse; Freeze
   holds the current form; Save writes the visible sculpture as .glb or .stl (.stl holds
   surfaces only, not lines; tube and shrink-wrap are closed solids; the shell has no
   thickness, so it needs thickening before printing).
