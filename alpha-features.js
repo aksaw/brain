@@ -18,6 +18,14 @@
 // Both hemispheres share one baseline per axis, so a steady difference between them is
 // kept (the shell between them opens) instead of being normalized away.
 //
+// Also kept, for forms built from the measures rather than from a curve:
+// - band powers (delta 1-4, theta 4-8, alpha 8-13, beta 13-30 Hz): the log power averaged
+//   over all four channels, each against its own baseline (-1..1), for the harmonograph;
+// - a spectrum per hemisphere (log power per 0.5 Hz bin from 1 to 30 Hz, both of that
+//   side's electrodes), each bin against a baseline shared by both sides (so it shows
+//   which frequencies are up or down on which side, not the usual 1/f slope), for the
+//   spectral vessel.
+//
 // Powers are measured FEATURE_RATE times a second over the last 2 s, smoothed over about a
 // second, then expressed against a running baseline (the last minute or so, as a z-score
 // / 2.5, clamped to -1..1), so the forms fill their space for any wearer and session.
@@ -53,6 +61,11 @@ const HANN = Float64Array.from({ length: WINDOW }, (_, i) => 0.5 - 0.5 * Math.co
 
 const HEAD_AXES = ['posterior', 'asymmetry', 'peak'];
 const SIDE_AXES = ['back', 'front', 'peak'];
+const BAND_RANGES = { delta: bins(1, 4), theta: bins(4, 8), alpha: bins(8, 13), beta: bins(13, 30) };
+const BAND_AXES = Object.keys(BAND_RANGES);
+const SPECTRUM = bins(1, 30); // [first bin, end)
+export const SPECTRUM_BINS = SPECTRUM[1] - SPECTRUM[0];
+export const SPECTRUM_HZ = { lo: SPECTRUM[0] * DF, step: DF };
 
 const power = (spectrum, [lo, hi]) => {
   let sum = 0;
@@ -77,6 +90,8 @@ function peakFrequency(spectra) {
 const clarity = (relative) => Math.max(0, Math.min(1, (relative - 0.2) / 0.2));
 
 const SMOOTH = 1 - Math.exp(-1 / (FEATURE_RATE * SMOOTH_S));
+// Single spectrum bins are much noisier than whole bands, so they're smoothed longer.
+const SPECTRUM_SMOOTH = 1 - Math.exp(-1 / (FEATURE_RATE * 3));
 const BASELINE = 1 - Math.exp(-1 / (FEATURE_RATE * BASELINE_S));
 
 // Exponential smoothing of a set of named values; `gate` scales how fast each follows.
@@ -120,6 +135,10 @@ export class AlphaFeatures {
     this.sides = HEMISPHERES.map(() => ({ values: rings(SIDE_AXES), smoothed: null }));
     this.headBaseline = Object.fromEntries(HEAD_AXES.map((axis) => [axis, new Baseline()]));
     this.sideBaseline = Object.fromEntries(SIDE_AXES.map((axis) => [axis, new Baseline()])); // shared
+    this.bands = { values: rings(BAND_AXES), smoothed: null };
+    this.bandBaseline = Object.fromEntries(BAND_AXES.map((axis) => [axis, new Baseline()]));
+    this.spectra = HEMISPHERES.map(() => ({ values: new Float32Array(this.ring * SPECTRUM_BINS), smoothed: null }));
+    this.binBaseline = Array.from({ length: SPECTRUM_BINS }, () => new Baseline()); // shared by both sides
     this.count = 0;
     this.next = null; // the next measurement index to compute
     this.first = null; // first stored (normalized) measurement index
@@ -159,7 +178,25 @@ export class AlphaFeatures {
       this.sides[s].smoothed = smoothInto(this.sides[s].smoothed, raw, { peak: clarity(backAlpha) });
     });
 
+    // Band powers over all four channels.
+    const bands = {};
+    for (const axis of BAND_AXES) {
+      bands[axis] = spectra.reduce((sum, spectrum) => sum + Math.log(power(spectrum, BAND_RANGES[axis])), 0) / spectra.length;
+    }
+    this.bands.smoothed = smoothInto(this.bands.smoothed, bands);
+
+    // Spectrum per hemisphere: log power per bin, both of that side's electrodes.
+    HEMISPHERES.forEach(({ back, front }, s) => {
+      const row = new Float64Array(SPECTRUM_BINS);
+      for (let b = 0; b < SPECTRUM_BINS; b++) row[b] = Math.log(spectra[back][SPECTRUM[0] + b] + spectra[front][SPECTRUM[0] + b] + 1e-12);
+      const side = this.spectra[s];
+      if (!side.smoothed) side.smoothed = row;
+      else for (let b = 0; b < SPECTRUM_BINS; b++) side.smoothed[b] += SPECTRUM_SMOOTH * (row[b] - side.smoothed[b]);
+    });
+
     for (const axis of HEAD_AXES) this.headBaseline[axis].add(this.head.smoothed[axis]);
+    for (const axis of BAND_AXES) this.bandBaseline[axis].add(this.bands.smoothed[axis]);
+    for (let b = 0; b < SPECTRUM_BINS; b++) for (const side of this.spectra) this.binBaseline[b].add(side.smoothed[b]);
     for (const axis of SIDE_AXES) for (const side of this.sides) this.sideBaseline[axis].add(side.smoothed[axis]);
     if (++this.count < WARMUP) return;
 
@@ -167,6 +204,10 @@ export class AlphaFeatures {
     for (const axis of HEAD_AXES) this.head.values[axis][at] = this.headBaseline[axis].normalize(this.head.smoothed[axis]);
     for (const side of this.sides) {
       for (const axis of SIDE_AXES) side.values[axis][at] = this.sideBaseline[axis].normalize(side.smoothed[axis]);
+    }
+    for (const axis of BAND_AXES) this.bands.values[axis][at] = this.bandBaseline[axis].normalize(this.bands.smoothed[axis]);
+    for (const side of this.spectra) {
+      for (let b = 0; b < SPECTRUM_BINS; b++) side.values[at * SPECTRUM_BINS + b] = this.binBaseline[b].normalize(side.smoothed[b]);
     }
     this.first ??= f;
     this.first = Math.max(this.first, f + 1 - this.ring);
@@ -206,6 +247,32 @@ export class AlphaFeatures {
   // The whole-head curve, or null before the baseline has warmed up.
   curve() {
     return this.first === null ? null : this.#curve(this.head.values, HEAD_AXES);
+  }
+
+  // Stored values of a set of axes at a fractional measurement index, interpolated.
+  #valuesAt(values, axes, t) {
+    const i = Math.floor(t);
+    const f = t - i;
+    const out = {};
+    for (const axis of axes) out[axis] = values[axis][i % this.ring] * (1 - f) + values[axis][(i + 1) % this.ring] * f;
+    return out;
+  }
+
+  // Whole-head measures { posterior, asymmetry, peak } at measurement t (each -1..1).
+  headAt(t) {
+    return this.#valuesAt(this.head.values, HEAD_AXES, t);
+  }
+
+  // Band powers { delta, theta, alpha, beta } at measurement t (each -1..1).
+  bandsAt(t) {
+    return this.#valuesAt(this.bands.values, BAND_AXES, t);
+  }
+
+  // One hemisphere's spectrum (SPECTRUM_BINS values, -1..1) at whole measurement i;
+  // side 0 is left, 1 right. A view into the history: copy it to keep it.
+  spectrumAt(i, side) {
+    const at = (i % this.ring) * SPECTRUM_BINS;
+    return this.spectra[side].values.subarray(at, at + SPECTRUM_BINS);
   }
 
   // [left, right] hemisphere curves, or nulls before the baseline has warmed up.

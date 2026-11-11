@@ -54,7 +54,19 @@ another.
     slower). Balls are thinned out automatically when there'd be too many to compute;
   - recurrence threads: a thread wherever the trajectory returns close to where it was at
     least half a cycle earlier (a recurrence plot in 3D); the Closeness slider sets how
-    close counts, live.
+    close counts, live;
+  - long exposure: every point the curve passes through is splatted into a slowly fading
+    density field, drawn as a surface around where it lingers (Exposure: how long a pass
+    lingers; Level: how dense a region must be; Clear starts afresh). A new exposure
+    starts from the history there is, older passes faded;
+  - spectral vessel (from the measures, not a curve): a pot whose height is time (newest
+    at the rim), angle is frequency (left hemisphere 1–30 Hz round one half, right back
+    round the other) and wall bulges where a frequency is stronger than usual (Relief);
+  - grown shell (from the measures): a seashell grown by accretion, two rings a second;
+    posterior alpha sets how fast each ring widens, asymmetry squashes the opening, peak
+    frequency deepens the ornament. Shape: nautilus (a flat spiral of wrapping whorls with
+    growth lines), auger (a tall slender spire with spiral ridges) or conch (a big body
+    whorl under a pointed spire, knobbed shoulder); Flare: how fast whorls widen.
   Materials: marble, bronze, white bronze, chrome, concrete, white stone (matte,
   unpatterned). Textures are laid out by distance along the form, so they aren't
   stretched, and anchored to the data, so they don't slide. Settings sit in a panel on the
@@ -76,7 +88,12 @@ another.
     them is kept: the shell between hemispheres widens where they disagree.
   Measured 16 times a second over 2 s windows, smoothed over about a second, and scaled
   against a running one-minute baseline. Their trails run from 5 s to 5 min; Scale and
-  Delay don't apply.
+  Delay don't apply. Also kept: band powers (delta, theta, alpha, beta) and a whitened
+  spectrum per hemisphere, for the harmonograph and the spectral vessel.
+- `generators.js` – geometry for forms with structure of their own, steered by those
+  measures: the harmonograph (a Curve option: three pairs of slow, slightly detuned
+  pendulums whose amplitudes follow the band powers and whose phase follows frontal
+  asymmetry), the spectral vessel and the grown shell.
 - `sonify-worklet.js` – audio-thread processor that turns the two traces into stereo sound.
 - `sonify-core.js` – the sound modes. Except for granular, they treat each side's point as
   a complex signal z = x + iy, so the direction the trace turns is audible:

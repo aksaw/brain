@@ -10,8 +10,12 @@ import { STLExporter } from 'three/addons/exporters/STLExporter.js';
 import { Muse, EEG_SAMPLE_RATE } from './muse.js';
 import { EegStream, SIDES, EMBEDDINGS, AutoDelay, bandDelay } from './eeg-stream.js';
 import { AlphaFeatures } from './alpha-features.js';
+import {
+  harmonographCurve, vesselGrid, shellGrid,
+  VESSEL_COLUMNS, VESSEL_MAX_ROWS, SHELL_COLUMNS, SHELL_MAX_ROWS,
+} from './generators.js';
 
-const MAX_POINTS = 640; // points per curve; longer trails are sampled more sparsely
+const MAX_POINTS = 1280; // points per curve; longer trails are sampled more sparsely
 const RADIAL = 16; // sides of the tube's cross-section
 const ACROSS = 6; // strips across a shell
 const TAPER = 0.3; // the oldest part of the trail (this fraction) tapers to nothing
@@ -34,6 +38,11 @@ const controlsIn = {
   spacing: $('spacing'),
   grid: $('grid'),
   closeness: $('closeness'),
+  exposure: $('exposure'),
+  level: $('level'),
+  relief: $('relief'),
+  expansion: $('expansion'),
+  shellShape: $('shell-shape'),
   rotate: $('rotate'),
   freeze: $('freeze'),
 };
@@ -42,8 +51,15 @@ const controlsIn = {
 
 const stream = new EegStream({ seconds: 16 });
 const alpha = new AlphaFeatures(stream);// The slow alpha curves: one whole-head curve, or one per hemisphere.
-const isAlphaCurve = () => controlsIn.curve.value.startsWith('alpha');
-const isWholeHeadCurve = () => controlsIn.curve.value === 'alphaPeak';
+// The slow curves (from the alpha measures, sampled FEATURE_RATE or so times a second, with
+// long trails): the whole-head alpha curve and the harmonograph have no sides; the
+// per-hemisphere alpha curve has two.
+const SLOW_CURVES = new Set(['alphaPeak', 'alphaHemi', 'harmonograph']);
+const WHOLE_HEAD_CURVES = new Set(['alphaPeak', 'harmonograph']);
+const isAlphaCurve = () => SLOW_CURVES.has(controlsIn.curve.value);
+const isWholeHeadCurve = () => WHOLE_HEAD_CURVES.has(controlsIn.curve.value);
+// Forms built straight from the measures, not from a curve.
+const GENERATED_FORMS = new Set(['vessel', 'grown']);
 const autoDelays = new Map(); // `${side}:${curve}` -> AutoDelay
 
 let muse = null;
@@ -70,6 +86,7 @@ connectButton.addEventListener('click', async () => {
   }
   stream.reset();
   alpha.reset();
+  clearDensity();
   autoDelays.clear();
   const current = new Muse();
   muse = current;
@@ -538,6 +555,91 @@ const pieces = SIDES.map(() => {
   return { tube, head, line, shell, rims, segments, blobs };
 });
 
+// A surface given as a grid of points: rows along its length, columns closing around it
+// (the vessel's wall, the shell's tube). Normals come from neighbouring points.
+class GridSurface {
+  constructor(material, maxRows, columns, tiles) {
+    this.columns = columns;
+    this.tiles = tiles; // texture repeats [around, along per row]
+    const rowSize = columns + 1; // the seam is repeated for the texture
+    this.positions = new Float32Array(maxRows * rowSize * 3);
+    this.normals = new Float32Array(maxRows * rowSize * 3);
+    this.uvs = new Float32Array(maxRows * rowSize * 2);
+    const index = new Uint32Array((maxRows - 1) * columns * 6);
+    let n = 0;
+    for (let r = 0; r < maxRows - 1; r++) {
+      for (let c = 0; c < columns; c++) {
+        const a = r * rowSize + c;
+        const b = a + rowSize;
+        index.set([a, b, a + 1, b, b + 1, a + 1], n); // facing along cross(down rows, around)
+        n += 6;
+      }
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3).setUsage(THREE.DynamicDrawUsage));
+    geometry.setAttribute('normal', new THREE.BufferAttribute(this.normals, 3).setUsage(THREE.DynamicDrawUsage));
+    geometry.setAttribute('uv', new THREE.BufferAttribute(this.uvs, 2).setUsage(THREE.DynamicDrawUsage));
+    geometry.setIndex(new THREE.BufferAttribute(index, 1));
+    geometry.setDrawRange(0, 0);
+    this.mesh = new THREE.Mesh(geometry, material);
+    this.mesh.castShadow = true;
+    this.mesh.receiveShadow = true;
+    this.mesh.frustumCulled = false;
+    this.mesh.visible = false;
+  }
+
+  // points: rows x columns x [x, y, z].
+  update(points, rows) {
+    const { columns, positions, normals, uvs } = this;
+    const rowSize = columns + 1;
+    const p = (r, c) => {
+      const i = (Math.max(0, Math.min(rows - 1, r)) * columns + ((c + columns) % columns)) * 3;
+      return [points[i], points[i + 1], points[i + 2]];
+    };
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c <= columns; c++) {
+        const along = sub(p(r + 1, c), p(r - 1, c));
+        const around = sub(p(r, c + 1), p(r, c - 1));
+        let normal = cross(along, around);
+        const length = Math.hypot(...normal);
+        normal = length > 1e-12 ? scaleVec(normal, 1 / length) : [0, 1, 0];
+        const v = (r * rowSize + c) * 3;
+        positions.set(p(r, c), v);
+        normals.set(normal, v);
+        uvs[(r * rowSize + c) * 2] = (c / columns) * this.tiles[0];
+        uvs[(r * rowSize + c) * 2 + 1] = r * this.tiles[1];
+      }
+    }
+    const geometry = this.mesh.geometry;
+    geometry.setDrawRange(0, Math.max(0, rows - 1) * columns * 6);
+    for (const name of ['position', 'normal', 'uv']) geometry.attributes[name].needsUpdate = true;
+    this.mesh.visible = rows > 1;
+  }
+}
+
+const vessel = new GridSurface(materials.marble, VESSEL_MAX_ROWS, VESSEL_COLUMNS, [6, 0.04]);
+const vesselPoints = new Float32Array(VESSEL_MAX_ROWS * VESSEL_COLUMNS * 3);
+const grown = new GridSurface(materials.marble, SHELL_MAX_ROWS, SHELL_COLUMNS, [2, 0.06]);
+const grownPoints = new Float32Array(SHELL_MAX_ROWS * SHELL_COLUMNS * 3);
+sculpture.add(vessel.mesh, grown.mesh);
+
+// Long exposure: every point the curve passes through is splatted into a density field
+// that slowly fades (the Exposure slider is how long a pass lingers), and the surface is
+// drawn where the density is above a fraction of its peak (the Level slider), so it wraps
+// the regions the mind keeps returning to. The field spans +-BLOB_SPAN plot radii.
+const DENSITY_RESOLUTION = 48;
+const DENSITY_SPLAT = 0.09; // plot radii
+const DENSITY_PER_SECOND = 64; // splats per second of curve, at most
+const density = makeBlobs(materials.marble, DENSITY_RESOLUTION);
+density.visible = false;
+sculpture.add(density);
+const densityState = { key: null, ends: [null, null], at: null };
+
+function clearDensity() {
+  density.field.fill(0);
+  densityState.ends = [null, null];
+}
+
 new ResizeObserver(() => {
   const { clientWidth: w, clientHeight: h } = stage;
   renderer.setSize(w, h);
@@ -567,6 +669,9 @@ function hideAll() {
     piece.segments.mesh.visible = false;
     piece.blobs.visible = false;
   }
+  vessel.mesh.visible = false;
+  grown.mesh.visible = false;
+  density.visible = false;
 }
 
 // Distance along a curve, for texture coordinates that keep the material's grain the same
@@ -769,21 +874,96 @@ function buildRecurrence(piece, curve, trail) {
   piece.segments.end();
 }
 
+// Adds a smooth bump (falling to zero at `radius` cells) to the density field at p.
+function splat(field, size, p, radius, weight = 1) {
+  const centre = p.map((v) => ((v / BLOB_SPAN + 1) / 2) * size);
+  const r2 = radius * radius;
+  const lo = centre.map((v) => Math.max(0, Math.floor(v - radius)));
+  const hi = centre.map((v) => Math.min(size - 1, Math.ceil(v + radius)));
+  for (let z = lo[2]; z <= hi[2]; z++) {
+    for (let y = lo[1]; y <= hi[1]; y++) {
+      for (let x = lo[0]; x <= hi[0]; x++) {
+        const d2 = (x - centre[0]) ** 2 + (y - centre[1]) ** 2 + (z - centre[2]) ** 2;
+        if (d2 < r2) field[x + y * size + z * size * size] += weight * (1 - d2 / r2) ** 2;
+      }
+    }
+  }
+}
+
+function buildDensity(curves, visible, now) {
+  // A new curve, scale or delay means a different space: start the exposure afresh.
+  const key = [controlsIn.curve.value, controlsIn.scale.value, controlsIn.delay.value].join('|');
+  if (key !== densityState.key) {
+    densityState.key = key;
+    clearDensity();
+  }
+  const dt = densityState.at === null ? 0 : Math.min(1, (now - densityState.at) / 1000);
+  densityState.at = now;
+  const { field, size } = density;
+  const fade = Math.exp(-dt / Number(controlsIn.exposure.value));
+  for (let i = 0; i < field.length; i++) field[i] *= fade;
+
+  const radius = (DENSITY_SPLAT / (2 * BLOB_SPAN)) * size;
+  curves.forEach((curve, s) => {
+    if (!curve || !visible(s)) return;
+    const step = Math.max(1, curve.rate / DENSITY_PER_SECOND);
+    const earliest = curve.first + Math.ceil(curve.lookback);
+    if (densityState.ends[s] === null) {
+      // A fresh exposure starts from the history there is (up to three exposure times),
+      // each pass faded by its age, as if the exposure had been running all along.
+      const exposure = Number(controlsIn.exposure.value);
+      const from = Math.max(earliest, curve.end - 3 * exposure * curve.rate);
+      for (let t = from; t < curve.end; t += step) {
+        splat(field, size, curve.at(t), radius, Math.exp(-(curve.end - t) / curve.rate / exposure));
+      }
+    } else {
+      // Then only what's new since the last frame (at most a second, if frames stalled).
+      const from = Math.max(densityState.ends[s], earliest, curve.end - curve.rate);
+      for (let t = from; t < curve.end; t += step) splat(field, size, curve.at(t), radius);
+    }
+    densityState.ends[s] = curve.end;
+  });
+
+  let peak = 0;
+  for (let i = 0; i < field.length; i++) if (field[i] > peak) peak = field[i];
+  if (peak <= 0) return;
+  density.isolation = Number(controlsIn.level.value) * peak;
+  density.normal_cache.fill(0); // normals are cached per update; the field changed in place
+  density.update();
+  density.visible = true;
+}
+
 function build(now) {
   const thickness = Number(controlsIn.thickness.value);
   const form = controlsIn.form.value;
   const sideChoice = controlsIn.side.value;
   hideAll();
 
+  if (form === 'vessel') {
+    vessel.update(vesselPoints, vesselGrid(alpha, Number(controlsIn.slowTrail.value), Number(controlsIn.relief.value), vesselPoints));
+    return;
+  }
+  if (form === 'grown') {
+    grown.update(grownPoints, shellGrid(alpha, Number(controlsIn.slowTrail.value), Number(controlsIn.expansion.value), controlsIn.shellShape.value, grownPoints));
+    return;
+  }
+
   // A curve per side ([left, right]); the whole-head alpha curve fills only the first slot.
   // The alpha curves are sampled FEATURE_RATE times a second and have their own long trails.
   const wholeHead = isWholeHeadCurve();
   let curves;
-  if (wholeHead) curves = [alpha.curve(), null];
+  if (controlsIn.curve.value === 'harmonograph') curves = [harmonographCurve(alpha), null];
+  else if (wholeHead) curves = [alpha.curve(), null];
   else if (isAlphaCurve()) curves = alpha.hemisphereCurves();
   else curves = SIDES.map((side) => sideCurve(side, now));
   const seconds = Number((isAlphaCurve() ? controlsIn.slowTrail : controlsIn.trail).value);
   const trailOf = (curve) => Math.round(seconds * curve.rate);
+
+  const visible = (s) => wholeHead || sideChoice === 'both' || sideChoice === SIDES[s].name;
+  if (form === 'density') {
+    buildDensity(curves, visible, now);
+    return;
+  }
 
   if (form === 'hemispheres') {
     // One shell spanning the left curve and the right curve at each instant.
@@ -800,7 +980,7 @@ function build(now) {
 
   SIDES.forEach((side, s) => {
     const curve = curves[s];
-    if (!curve || (!wholeHead && sideChoice !== 'both' && sideChoice !== side.name)) return;
+    if (!curve || !visible(s)) return;
     const trail = trailOf(curve);
     if (form === 'tube') buildTube(pieces[s], curve, trail, thickness);
     else if (form === 'blobs') buildBlobs(pieces[s], curve, trail);
@@ -854,21 +1034,28 @@ try {
 }
 
 function updateControls() {
-  // The alpha curves are already scaled and have no delay, so Scale and Delay don't apply;
-  // they get the long trail menu. The whole-head one has no sides, so neither Side nor the
-  // shell between hemispheres applies to it.
-  const slow = isAlphaCurve();
+  // The slow curves are already scaled and have no delay, so Scale and Delay don't apply;
+  // they get the long trail menu. The whole-head ones have no sides, so neither Side nor
+  // the shell between hemispheres applies to them. The vessel and grown shell are built
+  // from the measures directly: no curve, and the long trail menu sets how much history.
   const wholeHead = isWholeHeadCurve();
   const hemispheres = controlsIn.form.querySelector('option[value="hemispheres"]');
   hemispheres.disabled = wholeHead;
   if (wholeHead && controlsIn.form.value === 'hemispheres') controlsIn.form.value = 'tube';
   const form = controlsIn.form.value;
-  $('side-control').hidden = form === 'hemispheres' || wholeHead;
+  const generated = GENERATED_FORMS.has(form);
+  const slow = isAlphaCurve() || generated;
+  $('curve-control').hidden = generated;
+  $('side-control').hidden = form === 'hemispheres' || wholeHead || generated;
   $('scale-control').hidden = slow;
   $('delay-control').hidden = slow;
-  $('trail-control').hidden = slow;
-  $('slow-trail-control').hidden = !slow;
-  $('thickness-control').hidden = form === 'blobs' || form === 'recurrence';
+  $('trail-control').hidden = slow || form === 'density';
+  $('slow-trail-control').hidden = !slow || form === 'density';
+  $('thickness-control').hidden = !['tube', 'hemispheres'].includes(form);
+  for (const id of ['exposure-control', 'level-control', 'clear-control']) $(id).hidden = form !== 'density';
+  $('relief-control').hidden = form !== 'vessel';
+  $('expansion-control').hidden = form !== 'grown';
+  $('shape-control').hidden = form !== 'grown';
   $('ball-control').hidden = form !== 'blobs';
   $('blend-control').hidden = form !== 'blobs';
   $('spacing-control').hidden = form !== 'blobs';
@@ -878,6 +1065,7 @@ function updateControls() {
 }
 controlsIn.form.addEventListener('change', updateControls);
 controlsIn.curve.addEventListener('change', updateControls);
+$('clear-density').addEventListener('click', clearDensity);
 controlsIn.rotate.addEventListener('change', updateControls);
 updateControls();
 
