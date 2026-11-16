@@ -21,6 +21,18 @@ headband, and click **Connect**:
   AF7 against TP9 and AF8 against TP10, after the 1 Hz high-pass and 60 Hz notch.
 - http://localhost:8000/sculpture.html – Bineural's 3D curves built as solid sculpture in a
   black space. Needs an internet connection the first time, for Three.js from a CDN.
+- http://localhost:8000/portrait.html – a piece rather than an experiment: a live, mirrored
+  webcam portrait in greyscale against black, whose head is replaced by the surface
+  between the hemispheres (the per-hemisphere alpha curves over the last 10 s, in white
+  bronze), following the head as it turns. With depth estimated from the camera image, the
+  body is lit as relief by the same light, blurs with distance from the face, and anything
+  in front of the face (a raised hand) passes in front of the head. Click Camera, then
+  Connect. While it's in development, a settings panel on the right (hidden with the
+  corner button) has the trail, material, head size and lift, colour, and the depth
+  effects, with a live readout of drawing and depth speed; the panel, its button and the
+  cursor fade after a few still seconds, and F toggles full screen. Until there's enough
+  brain data, or when no face is in view, the real head stays. Depth needs WebGPU (Chrome
+  or Edge) to be quick, and downloads its model (tens of MB) the first time.
 
 The headband accepts one connection at a time, so disconnect one page before connecting
 another.
@@ -85,6 +97,21 @@ another.
   against a running one-minute baseline. Their trails run from 5 s to 5 min; Scale and
   Delay don't apply. Also kept: band powers (delta, theta, alpha, beta) and a whitened
   spectrum per hemisphere, for the harmonograph and the spectral vessel.
+- `portrait.js` – the portrait piece. MediaPipe (in the browser, from a CDN; no video
+  leaves the machine) finds the face's position, size and turn, and splits the image into
+  person, hair, face skin and accessories, as soft per-class confidences on a 512-pixel-wide
+  copy of each frame, eased over consecutive frames so edges don't chatter. Hair, face and
+  anything worn on the head are cut away and the rest of the person is shown in
+  greyscale; the coarse masks are refined against the full camera image on the GPU (a
+  joint bilateral filter), so the cut follows the real outline. The surface (re-centred
+  and scaled to head size, easing as the data moves) is drawn on the head. Head motion
+  is smoothed with a One Euro filter: steady when still, quick when moving. Depth comes
+  from Depth Anything V2 (small) through Transformers.js, on WebGPU where available,
+  running as fast as it can apart from drawing; each estimate is normalised and eased into
+  the last. Its depth is anchored to the face's: the relief is lit from the shell's key
+  light by the depth's slope, focus blur grows with distance from the face's depth, and
+  body nearer than the face writes the depth buffer (Reach sets how far in front a given
+  difference places it), so it hides the shell behind it.
 - `generators.js` – geometry for forms with structure of their own, steered by those
   measures: the harmonograph (a Curve option: three pairs of slow, slightly detuned
   pendulums whose amplitudes follow the band powers and whose phase follows frontal

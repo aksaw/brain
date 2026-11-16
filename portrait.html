@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Portrait</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    /* A full-screen piece. While it's in development, a settings panel overlays the right
+       edge; it hides with the button in the corner, and both fade with the cursor. */
+    html, body { height: 100%; }
+    body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+    body.idle { cursor: none; }
+    #stage { position: fixed; inset: 0; }
+    /* Mirrored like a looking glass. The scene is built in camera space and flipped here. */
+    #stage canvas { display: block; transform: scaleX(-1); }
+
+    #panel-toggle {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 3;
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      font-size: 16px;
+      line-height: 1;
+    }
+
+    #panel {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 2;
+      width: 280px;
+      box-sizing: border-box;
+      padding: 16px;
+      overflow-y: auto;
+      background: rgba(11, 11, 11, 0.88);
+      border-left: 1px solid #1e1e1e;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: transform 180ms ease, opacity 600ms ease;
+    }
+
+    body.collapsed #panel { transform: translateX(100%); }
+    body.idle #panel, body.idle #panel-toggle { opacity: 0; pointer-events: none; }
+    #panel-toggle { transition: opacity 600ms ease; }
+
+    #panel .top { display: flex; gap: 8px; margin-right: 42px; }
+    #panel .top button { flex: 1; }
+    #panel h2 {
+      margin: 10px 0 0;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    #panel label {
+      display: grid;
+      grid-template-columns: 84px minmax(0, 1fr);
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+    }
+    #panel label.check { display: flex; }
+    #panel label[hidden] { display: none; }
+    #panel select, #panel input[type='range'] { width: 100%; min-width: 0; box-sizing: border-box; }
+    #panel input { accent-color: var(--accent); }
+    #stats { margin: 0; color: var(--muted); font-variant-numeric: tabular-nums; white-space: pre-line; }
+    #panel a { color: var(--muted); margin-top: auto; padding-top: 12px; }
+    #unsupported { margin: 0; white-space: normal; }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="stage" role="img" aria-label="A live portrait whose head is a surface drawn by the sitter's brain activity"></div>
+
+  <button id="panel-toggle" aria-controls="panel" aria-expanded="true" title="Hide settings" aria-label="Hide settings">›</button>
+
+  <aside id="panel" aria-label="Settings">
+    <div class="top">
+      <button id="camera">Camera</button>
+      <button id="connect">Connect</button>
+    </div>
+    <p id="unsupported" hidden>
+      Web Bluetooth isn't available here. Use Chrome or Edge, and serve this page from
+      <code>localhost</code> or HTTPS.
+    </p>
+
+    <h2>Head</h2>
+    <label>
+      Trail
+      <select id="trail">
+        <option value="5">5 s</option>
+        <option value="10" selected>10 s</option>
+        <option value="30">30 s</option>
+        <option value="60">1 min</option>
+      </select>
+    </label>
+    <label>
+      Material
+      <select id="material">
+        <option value="whiteBronze" selected>White bronze</option>
+        <option value="stone">White stone</option>
+        <option value="chrome">Chrome</option>
+        <option value="bronze">Bronze</option>
+      </select>
+    </label>
+    <label>
+      Size
+      <input type="range" id="head-size" min="0.4" max="1.4" step="0.02" value="0.8">
+    </label>
+    <label>
+      Lift
+      <input type="range" id="head-lift" min="-0.2" max="0.6" step="0.02" value="0.25">
+    </label>
+
+    <h2>Body</h2>
+    <label>
+      Colour
+      <input type="range" id="colour" min="0" max="1" step="0.05" value="0">
+    </label>
+
+    <h2>Depth</h2>
+    <label class="check"><input type="checkbox" id="depth-on" checked> Estimate depth</label>
+    <!-- Sizes are multiples of 14, as the model needs. Larger is sharper and slower. -->
+    <label>
+      Detail
+      <select id="depth-size">
+        <option value="252">252 px</option>
+        <option value="364" selected>364 px</option>
+        <option value="518">518 px</option>
+      </select>
+    </label>
+    <label>
+      Relief
+      <input type="range" id="relief" min="0" max="1" step="0.05" value="0.6">
+    </label>
+    <label class="check"><input type="checkbox" id="occlusion" checked> Occlusion</label>
+    <label>
+      Reach
+      <input type="range" id="reach" min="0.5" max="8" step="0.25" value="3">
+    </label>
+    <label>
+      Focus blur
+      <input type="range" id="dof" min="0" max="1" step="0.05" value="0.35">
+    </label>
+    <label>
+      Fade
+      <input type="range" id="fade" min="0" max="1" step="0.05" value="0.2">
+    </label>
+    <label class="check"><input type="checkbox" id="show-depth"> Show depth map</label>
+    <p id="stats"></p>
+
+    <a href="index.html">All apps</a>
+  </aside>
+
+  <script type="module" src="portrait.js"></script>
+</body>
+</html>
