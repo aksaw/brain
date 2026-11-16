@@ -20,7 +20,12 @@ import { AlphaFeatures, FEATURE_RATE } from './alpha-features.js';
 
 const MAX_TRAIL_S = 60; // longest Trail setting
 const SEGMENT_WIDTH = 512; // the segmenter sees a copy of each frame this wide (faster)
-const MASK_SETTLE = 0.5; // each new mask blends this much into the last, so edges don't chatter
+// Each new mask blends into the last so edges don't chatter, but only where it changes a
+// little: where it changes a lot (the sitter moved) it's taken straight away, so the cut
+// keeps up with movement instead of trailing it.
+const MASK_SETTLE = 0.5; // the share of a small change taken each frame
+const MASK_FOLLOW = 4; // changes of 1/MASK_FOLLOW or more are taken whole
+const FACE_HOLD_MS = 1500; // a face lost from view (say, behind a hand) is held this long
 const DEPTH_SETTLE = 0.5; // likewise for each new depth map, so the relief doesn't shimmer
 const OCCLUDE_MARGIN = 0.04; // how much nearer than the face (in depth units) occludes
 
@@ -486,6 +491,7 @@ const cameraButton = $('camera');
 let faceLandmarker = null;
 let segmenter = null;
 let face = null; // { u, v, height (video fraction), box: [u0, v0, u1, v1], turn: Quaternion }
+let faceSeenAt = -Infinity; // when the face was last actually detected
 
 async function loadVision() {
   const fileset = await FilesetResolver.forVisionTasks(MEDIAPIPE);
@@ -574,8 +580,10 @@ function readMasks(confidence) {
       const person = 1 - background[i];
       let headPart = inside(x, y, hairBox) ? hair[i] + faceSkin[i] : 0;
       if (inside(x, y, gearBox)) headPart += gear[i];
-      settled[i * 2] += MASK_SETTLE * (person - settled[i * 2]);
-      settled[i * 2 + 1] += MASK_SETTLE * (Math.min(1, headPart) - settled[i * 2 + 1]);
+      const dp = person - settled[i * 2];
+      const dh = Math.min(1, headPart) - settled[i * 2 + 1];
+      settled[i * 2] += dp * Math.min(1, MASK_SETTLE + MASK_FOLLOW * Math.abs(dp));
+      settled[i * 2 + 1] += dh * Math.min(1, MASK_SETTLE + MASK_FOLLOW * Math.abs(dh));
       data[i * 2] = 255 * settled[i * 2];
       data[i * 2 + 1] = 255 * settled[i * 2 + 1];
     }
@@ -699,7 +707,15 @@ const segmentContext = segmentInput.getContext('2d', { willReadFrequently: true 
 function track(now) {
   if (!faceLandmarker || video.readyState < 2 || video.currentTime === lastVideoTime) return;
   lastVideoTime = video.currentTime;
-  face = readFace(faceLandmarker.detectForVideo(video, now));
+  // When the face drops out of view (a hand over it, a quick turn), keep the last one for a
+  // moment, so the head stays replaced rather than flashing back.
+  const seen = readFace(faceLandmarker.detectForVideo(video, now));
+  if (seen) {
+    face = seen;
+    faceSeenAt = now;
+  } else if (now - faceSeenAt > FACE_HOLD_MS) {
+    face = null;
+  }
   // The segmenter works on a smaller copy of the frame: faster, and its masks are coarse
   // anyway (the shader refines their edges against the full image).
   segmentInput.width = SEGMENT_WIDTH;
