@@ -10,10 +10,7 @@ import { STLExporter } from 'three/addons/exporters/STLExporter.js';
 import { Muse, EEG_SAMPLE_RATE } from './muse.js';
 import { EegStream, SIDES, EMBEDDINGS, AutoDelay, bandDelay } from './eeg-stream.js';
 import { AlphaFeatures } from './alpha-features.js';
-import {
-  harmonographCurve, vesselGrid, shellGrid,
-  VESSEL_COLUMNS, VESSEL_MAX_ROWS, SHELL_COLUMNS, SHELL_MAX_ROWS,
-} from './generators.js';
+import { harmonographCurve, vesselGrid, VESSEL_COLUMNS, VESSEL_MAX_ROWS } from './generators.js';
 
 const MAX_POINTS = 1280; // points per curve; longer trails are sampled more sparsely
 const RADIAL = 16; // sides of the tube's cross-section
@@ -41,8 +38,6 @@ const controlsIn = {
   exposure: $('exposure'),
   level: $('level'),
   relief: $('relief'),
-  expansion: $('expansion'),
-  shellShape: $('shell-shape'),
   rotate: $('rotate'),
   freeze: $('freeze'),
 };
@@ -59,7 +54,7 @@ const WHOLE_HEAD_CURVES = new Set(['alphaPeak', 'harmonograph']);
 const isAlphaCurve = () => SLOW_CURVES.has(controlsIn.curve.value);
 const isWholeHeadCurve = () => WHOLE_HEAD_CURVES.has(controlsIn.curve.value);
 // Forms built straight from the measures, not from a curve.
-const GENERATED_FORMS = new Set(['vessel', 'grown']);
+const GENERATED_FORMS = new Set(['vessel']);
 const autoDelays = new Map(); // `${side}:${curve}` -> AutoDelay
 
 let muse = null;
@@ -619,9 +614,7 @@ class GridSurface {
 
 const vessel = new GridSurface(materials.marble, VESSEL_MAX_ROWS, VESSEL_COLUMNS, [6, 0.04]);
 const vesselPoints = new Float32Array(VESSEL_MAX_ROWS * VESSEL_COLUMNS * 3);
-const grown = new GridSurface(materials.marble, SHELL_MAX_ROWS, SHELL_COLUMNS, [2, 0.06]);
-const grownPoints = new Float32Array(SHELL_MAX_ROWS * SHELL_COLUMNS * 3);
-sculpture.add(vessel.mesh, grown.mesh);
+sculpture.add(vessel.mesh);
 
 // Long exposure: every point the curve passes through is splatted into a density field
 // that slowly fades (the Exposure slider is how long a pass lingers), and the surface is
@@ -670,7 +663,6 @@ function hideAll() {
     piece.blobs.visible = false;
   }
   vessel.mesh.visible = false;
-  grown.mesh.visible = false;
   density.visible = false;
 }
 
@@ -943,10 +935,6 @@ function build(now) {
     vessel.update(vesselPoints, vesselGrid(alpha, Number(controlsIn.slowTrail.value), Number(controlsIn.relief.value), vesselPoints));
     return;
   }
-  if (form === 'grown') {
-    grown.update(grownPoints, shellGrid(alpha, Number(controlsIn.slowTrail.value), Number(controlsIn.expansion.value), controlsIn.shellShape.value, grownPoints));
-    return;
-  }
 
   // A curve per side ([left, right]); the whole-head alpha curve fills only the first slot.
   // The alpha curves are sampled FEATURE_RATE times a second and have their own long trails.
@@ -1036,8 +1024,8 @@ try {
 function updateControls() {
   // The slow curves are already scaled and have no delay, so Scale and Delay don't apply;
   // they get the long trail menu. The whole-head ones have no sides, so neither Side nor
-  // the shell between hemispheres applies to them. The vessel and grown shell are built
-  // from the measures directly: no curve, and the long trail menu sets how much history.
+  // the shell between hemispheres applies to them. The vessel is built from the
+  // measures directly: no curve, and the long trail menu sets how much history.
   const wholeHead = isWholeHeadCurve();
   const hemispheres = controlsIn.form.querySelector('option[value="hemispheres"]');
   hemispheres.disabled = wholeHead;
@@ -1054,8 +1042,6 @@ function updateControls() {
   $('thickness-control').hidden = !['tube', 'hemispheres'].includes(form);
   for (const id of ['exposure-control', 'level-control', 'clear-control']) $(id).hidden = form !== 'density';
   $('relief-control').hidden = form !== 'vessel';
-  $('expansion-control').hidden = form !== 'grown';
-  $('shape-control').hidden = form !== 'grown';
   $('ball-control').hidden = form !== 'blobs';
   $('blend-control').hidden = form !== 'blobs';
   $('spacing-control').hidden = form !== 'blobs';

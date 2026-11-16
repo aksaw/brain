@@ -62,11 +62,6 @@ another.
   - spectral vessel (from the measures, not a curve): a pot whose height is time (newest
     at the rim), angle is frequency (left hemisphere 1–30 Hz round one half, right back
     round the other) and wall bulges where a frequency is stronger than usual (Relief);
-  - grown shell (from the measures): a seashell grown by accretion, two rings a second;
-    posterior alpha sets how fast each ring widens, asymmetry squashes the opening, peak
-    frequency deepens the ornament. Shape: nautilus (a flat spiral of wrapping whorls with
-    growth lines), auger (a tall slender spire with spiral ridges) or conch (a big body
-    whorl under a pointed spire, knobbed shoulder); Flare: how fast whorls widen.
   Materials: marble, bronze, white bronze, chrome, concrete, white stone (matte,
   unpatterned). Textures are laid out by distance along the form, so they aren't
   stretched, and anchored to the data, so they don't slide. Settings sit in a panel on the
@@ -93,7 +88,7 @@ another.
 - `generators.js` – geometry for forms with structure of their own, steered by those
   measures: the harmonograph (a Curve option: three pairs of slow, slightly detuned
   pendulums whose amplitudes follow the band powers and whose phase follows frontal
-  asymmetry), the spectral vessel and the grown shell.
+  asymmetry) and the spectral vessel.
 - `sonify-worklet.js` – audio-thread processor that turns the two traces into stereo sound.
 - `sonify-core.js` – the sound modes. Except for granular, they treat each side's point as
   a complex signal z = x + iy, so the direction the trace turns is audible:
