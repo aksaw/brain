@@ -19,6 +19,8 @@ headband, and click **Connect**:
 - http://localhost:8000/dashboard.html – traces, contact quality, band powers and artifacts.
 - http://localhost:8000/bineural.html – two parametric (x-y) plots, one per side of the head:
   AF7 against TP9 and AF8 against TP10, after the 1 Hz high-pass and 60 Hz notch.
+  Settings sit in a panel on the right, grouped into Plot and Sound; the button in the
+  top-right corner hides it (remembered between visits) and the plots grow to fill the space.
 - http://localhost:8000/sculpture.html – Bineural's 3D curves built as solid sculpture in a
   black space. Needs an internet connection the first time, for Three.js from a CDN.
 - http://localhost:8000/portrait.html – a piece rather than an experiment: a live, mirrored

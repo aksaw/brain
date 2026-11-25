@@ -238,6 +238,31 @@ function showBpm() {
   } else bpmLabel.textContent = '–';
 }
 
+// The settings panel collapses to give the plots the whole window, as on the Sculpture
+// page. Whether it was open is remembered for next time, where the browser allows it.
+const PANEL_KEY = 'bineural.panelCollapsed';
+const panelToggle = document.getElementById('panel-toggle');
+
+function setPanelCollapsed(collapsed) {
+  document.body.classList.toggle('collapsed', collapsed);
+  panelToggle.textContent = collapsed ? '☰' : '›';
+  panelToggle.title = collapsed ? 'Show settings' : 'Hide settings';
+  panelToggle.setAttribute('aria-label', panelToggle.title);
+  panelToggle.setAttribute('aria-expanded', String(!collapsed));
+  try {
+    localStorage.setItem(PANEL_KEY, collapsed ? '1' : '0');
+  } catch {
+    // Storage unavailable (private window, blocked site data): just don't remember.
+  }
+}
+
+panelToggle.addEventListener('click', () => setPanelCollapsed(!document.body.classList.contains('collapsed')));
+try {
+  setPanelCollapsed(localStorage.getItem(PANEL_KEY) === '1');
+} catch {
+  setPanelCollapsed(false);
+}
+
 let muse = null;
 
 if (!navigator.bluetooth) {

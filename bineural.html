@@ -6,17 +6,88 @@
   <title>Bineural</title>
   <link rel="stylesheet" href="style.css">
   <style>
-    /* The plots fill the space below the header, centred both ways. */
+    /* Controls in a collapsible panel on the right, as on the Sculpture page; the plots fill
+       the rest, centred both ways. */
     body {
       background: #000;
       display: flex;
-      flex-direction: column;
-      min-height: 100vh;
-      box-sizing: border-box;
+      height: 100vh;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
     }
 
+    #panel {
+      flex: none;
+      width: 264px;
+      box-sizing: border-box;
+      padding: 16px;
+      overflow-x: hidden;
+      overflow-y: auto;
+      order: 2; /* after the plots */
+      background: #0b0b0b;
+      border-left: 1px solid #1e1e1e;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: width 180ms ease, padding 180ms ease;
+    }
+
+    body.collapsed #panel {
+      width: 0;
+      padding-left: 0;
+      padding-right: 0;
+      border-left: none;
+    }
+
+    /* The toggle stays in the top-right corner whether the panel is open or closed. */
+    #panel-toggle {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 2;
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      line-height: 1;
+      font-size: 16px;
+    }
+
+    #panel .top { display: flex; gap: 8px; margin-right: 42px; }
+    #panel .top button { flex: 1; }
+
+    #panel h2 {
+      margin: 10px 0 0;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    /* Each setting is a row: its name, then its control filling the rest. */
+    #panel label {
+      display: grid;
+      grid-template-columns: 76px minmax(0, 1fr);
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+    }
+
+    #panel label.check { display: flex; flex-wrap: wrap; column-gap: 6px; row-gap: 2px; white-space: normal; }
+    #panel label[hidden] { display: none; }
+    #panel select, #panel input[type='range'] { width: 100%; min-width: 0; box-sizing: border-box; }
+    #panel input { accent-color: var(--accent); }
+    #panel a { color: var(--muted); margin-top: auto; padding-top: 12px; }
+    #unsupported { margin: 0; white-space: normal; }
+    #bpm { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+    /* Plots are sized from the space beside the panel (container units), so they grow when
+       it's hidden: two side by side, or the overlay alone, as large as fits. */
     .xy {
       flex: 1;
+      min-width: 0;
+      container-type: size;
       display: flex;
       flex-wrap: wrap;
       justify-content: center;
@@ -27,15 +98,14 @@
 
     .xy figure {
       margin: 0;
-      width: min(100%, 46vw, 72vh);
+      width: min(calc(50cqw - 36px), calc(100cqh - 48px));
     }
 
     .xy figure[hidden] { display: none; }
     .xy.draggable { cursor: grab; touch-action: none; }
     .xy.dragging { cursor: grabbing; }
 
-    /* The overlay holds both hemispheres in one, larger plot. */
-    .xy #overlay-figure { width: min(100%, 92vw, 80vh); }
+    .xy #overlay-figure { width: min(calc(100cqw - 48px), calc(100cqh - 48px)); }
 
     .xy canvas {
       display: block;
@@ -44,19 +114,24 @@
       background: #000;
     }
 
-    header a { color: var(--muted); margin-left: auto; }
-    header label[hidden] { display: none; }
-    #bpm { color: var(--muted); font-variant-numeric: tabular-nums; }
-    #volume, #reverb, #sphere { accent-color: var(--accent); vertical-align: middle; }
-
+    /* On narrow screens the panel floats over the plots, which stack. */
     @media (max-width: 720px) {
-      .xy figure { width: 100%; }
+      #panel { position: absolute; z-index: 1; top: 0; bottom: 0; right: 0; }
+      .xy figure { width: min(calc(100cqw - 32px), calc(50cqh - 36px)); }
     }
   </style>
 </head>
 <body>
-  <header>
-    <button id="connect">Connect</button>
+  <button id="panel-toggle" aria-controls="panel" aria-expanded="true" title="Hide settings" aria-label="Hide settings">›</button>
+
+  <aside id="panel" aria-label="Settings">
+    <div class="top"><button id="connect">Connect</button></div>
+    <p id="unsupported" hidden>
+      Web Bluetooth isn't available here. Use Chrome or Edge, and serve this page from
+      <code>localhost</code> or HTTPS.
+    </p>
+
+    <h2>Plot</h2>
     <label>
       Scale
       <select id="scale">
@@ -106,7 +181,9 @@
         <option value="head">Head</option>
       </select>
     </label>
-    <label id="overlay-control"><input type="checkbox" id="overlay"> Overlay</label>
+    <label id="overlay-control" class="check"><input type="checkbox" id="overlay"> Overlay</label>
+
+    <h2>Sound</h2>
     <label>
       Sound
       <select id="sound">
@@ -126,7 +203,7 @@
         <option value="100">×100</option>
       </select>
     </label>
-    <label id="crush-control" hidden><input type="checkbox" id="crush"> Bitcrush</label>
+    <label id="crush-control" class="check" hidden><input type="checkbox" id="crush"> Bitcrush</label>
     <label id="range-control" hidden>
       Range
       <select id="range">
@@ -141,7 +218,7 @@
       <input type="range" id="sphere" min="0.15" max="0.95" step="0.01" value="0.5">
     </label>
     <!-- A soft bass thump on every heartbeat seen by the headband's heart sensor (PPG). -->
-    <label id="thump-control" hidden>
+    <label id="thump-control" class="check" hidden>
       <input type="checkbox" id="thump"> Heartbeat thump <span id="bpm"></span>
     </label>
     <label>
@@ -152,13 +229,9 @@
       Reverb
       <input type="range" id="reverb" min="0" max="2" step="0.01" value="0.3">
     </label>
-    <a href="dashboard.html">Dashboard</a>
-  </header>
 
-  <p id="unsupported" hidden>
-    Web Bluetooth isn't available here. Use Chrome or Edge, and serve this page from
-    <code>localhost</code> or HTTPS.
-  </p>
+    <a href="dashboard.html">Dashboard</a>
+  </aside>
 
   <main class="xy">
     <figure class="split">
