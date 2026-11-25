@@ -101,6 +101,7 @@ export class ShapeDrone {
     this.bright = 0;
     this.full = 0;
     this.detune = 0.001;
+    this.shift = 0; // octaves to move the whole sound by (the layer under the plucks: -1)
     this.count = 0;
     // Per voice (root, fifth) and slot: two phases, increments and a weight.
     const n = 2 * SLOTS;
@@ -166,7 +167,9 @@ export class ShapeDrone {
     this.full += (1 - elong - this.full) * ease(0.3);
     this.detune += (0.001 + 0.006 * spin - this.detune) * ease(0.3);
 
-    const centre = 2.3 + 2.2 * this.bright; // in octaves above A0: about 135 to 620 Hz
+    // In octaves above A0: about 135 to 620 Hz, or an octave lower with shift -1. Each note
+    // is a stack of octaves under this envelope, so moving it moves the register, not the note.
+    const centre = 2.3 + 2.2 * this.bright + this.shift;
     const sigma = 0.9 + 0.4 * this.bright;
     let total = 0;
     for (let v = 0; v < 2; v++) {

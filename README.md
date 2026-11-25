@@ -147,7 +147,8 @@ another.
     brightness; a flat trail is a single tone and a round one adds the fifth; net turning
     makes it shimmer. It plays about 60 ms behind the newest data;
   - plucks (big swings): see `plucks.js`; this file only plays the marimba notes.
-  Each ear gets mostly its own side, with a little of the other.
+  With Plucks, the drone can also play underneath as a layer, an octave lower, at its own
+  level (the Drone slider). Each ear gets mostly its own side, with a little of the other.
 - `sonify-core.js` – the other sound modes. Except for granular, they treat each side's point as
   a complex signal z = x + iy, so the direction the trace turns is audible:
   - granular: the bipolar difference x − y played back sped up (×25 to ×100) as many short,

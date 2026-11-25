@@ -16,6 +16,7 @@ class Sonifier extends AudioWorkletProcessor {
       crush: false,
       scale: 50, // µV at the plot's edge
       trail: 1, // seconds of trail on screen
+      droneLayer: 0, // level of the drone under the plucks, 0..about 2
       map: { eegLow: 1, eegHigh: 45, audioLow: 55, audioHigh: 7040 },
     };
     this.sides = [0, 1].map(() => ({
@@ -30,6 +31,7 @@ class Sonifier extends AudioWorkletProcessor {
       marimba: new Marimba(),
     }));
     this.traceOut = [new Float32Array(128), new Float32Array(128)];
+    this.droneLayerGain = 0; // eased towards settings.droneLayer, so moving it doesn't click
     // The heartbeat thump, the same in both ears; the page posts a beat when the PPG sees one.
     this.thump = new Thump();
     this.thumpLevel = 0.45;
@@ -90,22 +92,33 @@ class Sonifier extends AudioWorkletProcessor {
     return true;
   }
 
-  // Advances both sides' trace playback (always, so it stays current) and renders the
-  // drone from it, or the marimba's plucks, into traceOut.
+  // Advances both sides' trace playback (always, so it stays current) and renders into
+  // traceOut the drone, or the marimba's plucks with the drone as a layer underneath at its
+  // own level.
   #renderTrace(mode, length) {
-    const { scale, trail } = this.settings;
+    const { scale, trail, droneLayer } = this.settings;
+    const plucks = mode === 'plucks';
+    const ease = 1 - Math.exp(-1 / (0.05 * sampleRate));
+    const gains = new Float32Array(length);
+    for (let n = 0; n < length; n++) {
+      this.droneLayerGain += ((plucks ? droneLayer : 0) - this.droneLayerGain) * ease;
+      gains[n] = this.droneLayerGain;
+    }
     this.sides.forEach((side, s) => {
       if (this.traceOut[s].length !== length) this.traceOut[s] = new Float32Array(length);
       const out = this.traceOut[s];
       const { player } = side;
+      side.drone.shift = plucks ? -1 : 0; // under the plucks it sits an octave lower
       for (let n = 0; n < length; n++) {
-        out[n] = mode === 'plucks' ? side.marimba.next(sampleRate) : 0;
+        out[n] = plucks ? side.marimba.next(sampleRate) : 0;
         if (!player.next(sampleRate)) continue;
+        if (mode !== 'drone' && !plucks) continue;
         const x = player.x / scale;
         const y = player.y / scale;
-        if (mode === 'drone') {
-          out[n] = side.drone.next(x, y, player.vx / scale, player.vy / scale, trail, sampleRate);
-        }
+        // The drone keeps following the trail under the plucks even when turned down, so
+        // it's already in tune with the shape when turned up.
+        const drone = side.drone.next(x, y, player.vx / scale, player.vy / scale, trail, sampleRate);
+        out[n] += plucks ? gains[n] * drone : drone;
       }
     });
   }

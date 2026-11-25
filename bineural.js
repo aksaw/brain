@@ -89,6 +89,7 @@ const crushCheckbox = document.getElementById('crush');
 const rangeSelect = document.getElementById('range');
 const volumeInput = document.getElementById('volume');
 const reverbInput = document.getElementById('reverb');
+const droneLayerInput = document.getElementById('drone-layer');
 let audio = null; // { context, node, gain } once sound has been switched on
 let sentEnd = null; // one past the newest sample index sent to the audio thread
 
@@ -166,6 +167,7 @@ function sendSoundSettings() {
   document.getElementById('crush-control').hidden = mode !== 'granular';
   document.getElementById('range-control').hidden = mode !== 'spectral';
   document.getElementById('sphere-control').hidden = mode !== 'plucks';
+  document.getElementById('drone-layer-control').hidden = mode !== 'plucks';
   document.getElementById('thump-control').hidden = mode === 'off';
   if (!audio) return;
   // The spectral map spreads the EEG band from the high-pass up to SOUND_TOP_HZ over the
@@ -186,6 +188,8 @@ function sendSoundSettings() {
       // Drone and plucks work in the plot's own coordinates and over its trail.
       scale: Number(scaleSelect.value),
       trail: Number(trailSelect.value),
+      // The drone under the plucks, on a squared curve like the volume.
+      droneLayer: Number(droneLayerInput.value) ** 2,
     },
   });
   // Volume on a squared curve, which sounds more even across the slider.
@@ -206,7 +210,8 @@ soundSelect.addEventListener('change', async () => {
   if (soundSelect.value === 'off') audio.context.suspend();
   else audio.context.resume();
 });
-for (const control of [speedSelect, rangeSelect, volumeInput, reverbInput, scaleSelect, trailSelect]) {
+const liveControls = [speedSelect, rangeSelect, volumeInput, reverbInput, scaleSelect, trailSelect, droneLayerInput];
+for (const control of liveControls) {
   control.addEventListener('input', sendSoundSettings);
 }
 crushCheckbox.addEventListener('change', sendSoundSettings);
