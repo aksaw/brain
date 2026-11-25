@@ -406,3 +406,27 @@ export class LayeredShift {
     return out;
   }
 }
+
+// A soft, low thump, played on each heartbeat: a sine that eases in over 15 ms (so there's
+// no click or snap), glides gently from 70 Hz down to 42 Hz, and fades out over about half
+// a second. Felt more than heard.
+export class Thump {
+  constructor() {
+    this.t = Infinity; // seconds since the last beat
+    this.phase = 0;
+  }
+
+  trigger() {
+    this.t = 0;
+    this.phase = 0;
+  }
+
+  next(rate) {
+    const t = this.t;
+    if (t > 0.6) return 0;
+    this.t += 1 / rate;
+    this.phase += (2 * Math.PI * (42 + 28 * Math.exp(-t / 0.08))) / rate;
+    const attack = t < 0.015 ? 0.5 - 0.5 * Math.cos((Math.PI * t) / 0.015) : 1;
+    return attack * Math.exp(-t / 0.12) * Math.sin(this.phase);
+  }
+}

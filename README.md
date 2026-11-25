@@ -39,7 +39,11 @@ another.
 
 ## Files
 
-- `muse.js` – BLE client: GATT UUIDs, command framing, packet decoding.
+- `muse.js` – BLE client: GATT UUIDs, command framing, packet decoding. Optionally streams
+  the Muse 2's heart sensor (PPG, 64 Hz), which switches the headband to preset p50.
+- `heartbeat.js` – finds heartbeats in the infrared PPG: band-passed to 0.7–4 Hz, a beat
+  wherever the slope crosses half its recent peak in the direction of the pulse's quick
+  swing (found from the data), with a refractory gap so each pulse counts once.
 - `app.js` – the dashboard: ring buffers, contact quality, and canvas rendering (5 s window, DC offset removed per channel).
 - `bineural.js` – the x-y plots: filters each channel and pairs samples by packet sequence number.
   Also feeds the sound each side's trace, AF7/TP9 to the left ear and AF8/TP10 to the right.
@@ -117,7 +121,32 @@ another.
   pendulums whose amplitudes follow the band powers and whose phase follows frontal
   asymmetry) and the spectral vessel.
 - `sonify-worklet.js` – audio-thread processor that turns the two traces into stereo sound.
-- `sonify-core.js` – the sound modes. Except for granular, they treat each side's point as
+- `plucks.js` – the Plucks sound mode: imaginary marimba bars in a shell around the plot's
+  centre, a sphere divided into chunks, ten around (the note: two octaves of A minor
+  pentatonic rising anticlockwise from the right) by three bands of latitude (the octave).
+  The trace strikes a chunk as it crosses the shell's inner surface on its way out, once
+  per swing (it must come back inside 60% of that radius to strike again). The Sphere size
+  slider sets that radius, from 0.15 to 0.95 of the plot's (0.5 to start): a performer's
+  control for how dense the hits are, smaller for more. As with a
+  mallet, how fast it is moving outwards as it crosses sets how hard. A closer Scale gives
+  more strikes. It runs on the page, on the very points drawn, so a strike sounds within a
+  frame of the data arriving. In 2D the trace stays on the equator, so the shell is drawn
+  as a ring of ten bars around each plot; in the 3D views it is the whole sphere, struck by
+  each side's trace in that view (one sphere per side's plot, or one shared in the
+  overlay), and in 3D PCA one shell for the whole head, played in both ears. Struck chunks
+  light up and fade with the note.
+  The shell is invisible at rest: only struck chunks appear, fading out with the note.
+- `sonify-trace.js` – the two sound modes that follow the trace as the plot draws it
+  (the same smoothed signal, in the plot's coordinates, so the Scale and Trail settings
+  shape the sound too), both in A minor pentatonic:
+  - drone (trail shape): follows the shape of the trail rather than the fast-moving point.
+    The trail's long axis picks the note, half a turn anticlockwise climbing an octave of
+    the scale and on round without end (Shepard tones); its size sets loudness and
+    brightness; a flat trail is a single tone and a round one adds the fifth; net turning
+    makes it shimmer. It plays about 60 ms behind the newest data;
+  - plucks (big swings): see `plucks.js`; this file only plays the marimba notes.
+  Each ear gets mostly its own side, with a little of the other.
+- `sonify-core.js` – the other sound modes. Except for granular, they treat each side's point as
   a complex signal z = x + iy, so the direction the trace turns is audible:
   - granular: the bipolar difference x − y played back sped up (×25 to ×100) as many short,
     randomly timed, overlapping grains, so a rhythm at f Hz is heard as a band of textured
@@ -128,6 +157,10 @@ another.
     just below, each layer at its own level;
   - spectral map: complex FFT peaks mapped log-to-log out from the centre of the audio range,
     anticlockwise up and clockwise down, snapped to harmonics of 55 Hz that fade in and out.
+
+  With any mode on, Heartbeat thump adds a soft, low thump (a sine easing in and gliding
+  from 70 Hz to 42 Hz) in both ears on every heartbeat the PPG finds, with the heart rate shown
+  beside it. It plays as each beat arrives, up to about 0.1 s after the pulse.
 
   Levels follow a slow (30 s) running average, so real swells are heard. The page adds a
   generated stereo reverb with an amount slider. The plots always show the newest data;

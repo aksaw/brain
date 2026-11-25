@@ -1,5 +1,14 @@
-import { Muse, EEG_CHANNELS, EEG_SAMPLE_RATE, EEG_SAMPLES_PER_PACKET } from './muse.js';
+import {
+  Muse,
+  EEG_CHANNELS,
+  EEG_SAMPLE_RATE,
+  EEG_SAMPLES_PER_PACKET,
+  PPG_CHANNELS,
+  PPG_SAMPLE_RATE,
+} from './muse.js';
 import { highpass, lowpass, notch } from './filters.js';
+import { HeartbeatDetector } from './heartbeat.js';
+import { PluckDetector, THICKNESS, SECTORS, BANDS, EQUATOR, chunkIndex } from './plucks.js';
 
 // Each plot traces one side of the head: its forehead channel on x, its ear channel on y.
 const PLOTS = [
@@ -96,15 +105,24 @@ function feedAudio() {
     return;
   }
   if (end <= sentEnd) return;
+  // x, y: full band, for the older modes; dx, dy: smoothed as drawn, for drone and plucks.
+  const n = end - sentEnd;
   const sides = SIDES.map(({ x, y }) => {
-    const side = { x: new Float32Array(end - sentEnd), y: new Float32Array(end - sentEnd) };
+    const side = {
+      x: new Float32Array(n),
+      y: new Float32Array(n),
+      dx: new Float32Array(n),
+      dy: new Float32Array(n),
+    };
     for (let i = sentEnd; i < end; i++) {
       side.x[i - sentEnd] = channels[x].values[i % RING];
       side.y[i - sentEnd] = channels[y].values[i % RING];
+      side.dx[i - sentEnd] = channels[x].display[i % RING];
+      side.dy[i - sentEnd] = channels[y].display[i % RING];
     }
     return side;
   });
-  const buffers = sides.flatMap(({ x, y }) => [x.buffer, y.buffer]);
+  const buffers = sides.flatMap((side) => Object.values(side).map((a) => a.buffer));
   audio.node.port.postMessage({ type: 'eeg', sides }, buffers);
   sentEnd = end;
 }
@@ -147,6 +165,8 @@ function sendSoundSettings() {
   document.getElementById('speed-control').hidden = mode !== 'granular';
   document.getElementById('crush-control').hidden = mode !== 'granular';
   document.getElementById('range-control').hidden = mode !== 'spectral';
+  document.getElementById('sphere-control').hidden = mode !== 'plucks';
+  document.getElementById('thump-control').hidden = mode === 'off';
   if (!audio) return;
   // The spectral map spreads the EEG band from the high-pass up to SOUND_TOP_HZ over the
   // chosen audio range.
@@ -158,14 +178,24 @@ function sendSoundSettings() {
   };
   audio.node.port.postMessage({
     type: 'settings',
-    settings: { mode, speed: Number(speedSelect.value), crush: crushCheckbox.checked, map },
+    settings: {
+      mode,
+      speed: Number(speedSelect.value),
+      crush: crushCheckbox.checked,
+      map,
+      // Drone and plucks work in the plot's own coordinates and over its trail.
+      scale: Number(scaleSelect.value),
+      trail: Number(trailSelect.value),
+    },
   });
   // Volume on a squared curve, which sounds more even across the slider.
   const now = audio.context.currentTime;
   audio.gain.gain.setTargetAtTime(Number(volumeInput.value) ** 2, now, 0.05);
   const reverb = Number(reverbInput.value);
   audio.wet.gain.setTargetAtTime(reverb, now, 0.05);
-  audio.dry.gain.setTargetAtTime(1 - 0.5 * reverb, now, 0.05);
+  // Up to 1 the dry signal gives way as before; past it (up to 2) the reverb keeps
+  // growing over a little dry signal, for a washed-out sound.
+  audio.dry.gain.setTargetAtTime(Math.max(0.2, 1 - 0.5 * reverb), now, 0.05);
 }
 
 soundSelect.addEventListener('change', async () => {
@@ -176,10 +206,37 @@ soundSelect.addEventListener('change', async () => {
   if (soundSelect.value === 'off') audio.context.suspend();
   else audio.context.resume();
 });
-for (const control of [speedSelect, rangeSelect, volumeInput, reverbInput]) {
+for (const control of [speedSelect, rangeSelect, volumeInput, reverbInput, scaleSelect, trailSelect]) {
   control.addEventListener('input', sendSoundSettings);
 }
 crushCheckbox.addEventListener('change', sendSoundSettings);
+
+// Heartbeat thump: the infrared PPG channel shows the pulse most clearly. Each beat it finds
+// is posted to the audio thread straight away, so the thump lands when the beat arrives
+// (a packet holds 6 samples, so up to about 0.1 s after the pulse itself).
+const thumpCheckbox = document.getElementById('thump');
+const bpmLabel = document.getElementById('bpm');
+const PPG_PULSE = PPG_CHANNELS.indexOf('infrared');
+const heartbeat = new HeartbeatDetector(PPG_SAMPLE_RATE);
+let lastBeat = 0; // performance.now() of the newest beat
+
+function addPpg(channel, _seq, samples) {
+  if (channel !== PPG_PULSE) return;
+  for (const s of samples) {
+    if (!heartbeat.process(s)) continue;
+    lastBeat = performance.now();
+    if (audio && thumpCheckbox.checked) audio.node.port.postMessage({ type: 'beat' });
+  }
+  showBpm();
+}
+
+function showBpm() {
+  if (!muse) bpmLabel.textContent = '';
+  else if (!muse.hasPpg) bpmLabel.textContent = '(no heart sensor)';
+  else if (heartbeat.bpm && performance.now() - lastBeat < 3000) {
+    bpmLabel.textContent = `${Math.round(heartbeat.bpm)} bpm`;
+  } else bpmLabel.textContent = '–';
+}
 
 let muse = null;
 
@@ -206,19 +263,23 @@ connectButton.addEventListener('click', async () => {
   resetChannels();
   resetPca();
   resetHead();
-  const current = new Muse();
+  heartbeat.reset();
+  const current = new Muse({ ppg: true });
   muse = current;
   muse.onEeg = addSamples;
+  muse.onPpg = addPpg;
   muse.onGyro = addGyro;
   muse.onDisconnect = () => {
     if (muse !== current) return; // a late event from an earlier connection
     muse = null;
     setButton('Connect');
+    showBpm();
   };
   try {
     setButton('Connecting…', { busy: true });
     await muse.connect();
     setButton('Disconnect');
+    showBpm();
   } catch (err) {
     console.error(err);
     muse = null;
@@ -483,10 +544,13 @@ function readAt(ring, t) {
 // - takensSum: the same for the side's average, s = (x + y) / 2, the activity the forehead
 //   and ear channels share
 // tau comes from the Delay setting; when automatic, it's measured on the embedded signal.
-function drawSide(target, p, view, scale, trail, project, now) {
+// Returns the side's point(i), in plot radii, and the range of samples it can give: from
+// `first` (allowing for the delays' look back) up to `end`. Null before there's data.
+// Worked out once a frame and shared by the drawing and the plucks.
+function sideView(p, view, scale, now) {
   const cx = channels[p.xi];
   const cy = channels[p.yi];
-  if (cx.first === null || cy.first === null) return;
+  if (cx.first === null || cy.first === null) return null;
   const end = Math.min(cx.end, cy.end);
   const first = Math.max(cx.first, cy.first);
   const norm = (v) => Math.max(-1, Math.min(1, v / scale));
@@ -519,10 +583,15 @@ function drawSide(target, p, view, scale, trail, project, now) {
     lookback = Math.ceil(2 * tau);
     point = (i) => [norm(s(i)), norm(s(i - tau)), norm(s(i - 2 * tau))];
   } else {
-    point = (i) => [norm(x(i)), norm(y(i)), 0];
+    point = flatPoint(p, scale);
   }
+  return { point, end, first: first + lookback };
+}
 
-  const start = Math.max(end - trail, first + lookback);
+function drawSide(target, side, trail, project) {
+  if (!side) return;
+  const { point, end, first } = side;
+  const start = Math.max(end - trail, first);
   if (end - start < 2) return;
   drawTrace(target, point, start, end, project);
 }
@@ -605,17 +674,184 @@ function updatePca(now) {
   }
 }
 
+// One side's plain (x, y) trace at whole sample i, in plot radii (z is 0).
+function flatPoint(p, scale) {
+  const cx = channels[p.xi];
+  const cy = channels[p.yi];
+  const norm = (v) => Math.max(-1, Math.min(1, v / scale));
+  return (i) => [norm(cx.display[i % RING]), norm(cy.display[i % RING]), 0];
+}
+
+// The whole head's trace at whole sample i, on the three principal axes, in plot radii.
+function pcaPoint(scale) {
+  const norm = (v) => Math.max(-1, Math.min(1, v / scale));
+  return (i) => {
+    const v = channels.map((c) => c.display[i % RING]);
+    return pca.axes.map((axis) => norm(axis.reduce((s, a, c) => s + a * v[c], 0)));
+  };
+}
+
 function drawWholeHead(scale, trail, project) {
   if (!pca.axes) return;
   const end = Math.min(...channels.map((c) => c.end));
   const start = Math.max(end - trail, ...channels.map((c) => c.first));
   if (end - start < 2) return;
-  const norm = (v) => Math.max(-1, Math.min(1, v / scale));
-  const point = (i) => {
-    const v = channels.map((c) => c.display[i % RING]);
-    return pca.axes.map((axis) => norm(axis.reduce((s, a, c) => s + a * v[c], 0)));
+  drawTrace(overlay, pcaPoint(scale), start, end, project);
+}
+
+// Plucks (see plucks.js): found here, on the same points the plot draws, then posted to the
+// audio thread. Each side has its own detector on its trace in the current view; the
+// whole-head view has one, played in both ears. In 2D the struck bars are drawn as a ring
+// around each plot, and in the 3D views as a sphere of chunks (one per side's plot, or one
+// shared in the overlay). Switching views starts the detectors afresh, so the jump from one
+// shape to another doesn't strike.
+plots.forEach((p) => (p.plucker = new PluckDetector()));
+const wholePlucker = new PluckDetector();
+let pluckView = null;
+
+const sphereInput = document.getElementById('sphere');
+
+function runPlucks(view, sides, scale, plucking, now) {
+  const radius = Number(sphereInput.value);
+  plots.forEach((p) => (p.plucker.radius = radius));
+  wholePlucker.radius = radius;
+  if (view !== pluckView) {
+    pluckView = view;
+    plots.forEach((p) => p.plucker.reset());
+    wholePlucker.reset();
+  }
+  const whole = view === 'pca';
+  plots.forEach((p, s) => {
+    if (!plucking || whole || !sides[s]) return p.plucker.reset();
+    feedPlucker(p.plucker, sides[s].point, sides[s].end, sides[s].first, [s], now);
+  });
+  if (!plucking || !whole || !pca.axes) return wholePlucker.reset();
+  const end = Math.min(...channels.map((c) => c.end));
+  const first = Math.max(...channels.map((c) => c.first));
+  feedPlucker(wholePlucker, pcaPoint(scale), end, first, [0, 1], now);
+}
+
+function feedPlucker(detector, point, end, first, sides, now) {
+  // Start from the newest sample, not from whatever came before plucks were switched on.
+  if (detector.next === null || detector.next < first || end - detector.next > RING / 2) {
+    detector.next = end;
+  }
+  for (; detector.next < end; detector.next++) {
+    const strike = detector.process(detector.next, point(detector.next));
+    if (!strike) continue;
+    detector.light(strike, now);
+    // In both ears at once, each a little softer.
+    const velocity = strike.velocity * (sides.length > 1 ? 0.7 : 1);
+    audio.node.port.postMessage({ type: 'pluck', sides, freq: strike.freq, velocity });
+  }
+}
+
+const TAU = 2 * Math.PI;
+const CHUNK_GAP = 0.035; // radians between neighbouring chunks
+
+// 2D: the shell's equator, a ring of ten bars between the inner and outer radius. Only lit
+// bars show.
+function drawRing(target, glow, inner) {
+  const outer = inner + THICKNESS;
+  const { ctx } = target;
+  const mid = target.canvas.clientWidth / 2;
+  const radius = mid - 12;
+  ctx.save();
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#fff';
+  ctx.shadowColor = '#fff';
+  ctx.lineWidth = 1;
+  for (let s = 0; s < SECTORS; s++) {
+    const g = glow(chunkIndex(s, EQUATOR));
+    if (g < 0.02) continue; // invisible at rest, shown only while lit
+    const a0 = (s / SECTORS) * TAU + CHUNK_GAP;
+    const a1 = ((s + 1) / SECTORS) * TAU - CHUNK_GAP;
+    // The canvas's y points down, so a plot angle a is the canvas angle -a.
+    ctx.beginPath();
+    ctx.arc(mid, mid, outer * radius, -a0, -a1, true);
+    ctx.arc(mid, mid, inner * radius, -a1, -a0, false);
+    ctx.closePath();
+    ctx.shadowBlur = 24 * g;
+    ctx.globalAlpha = 0.8 * g;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 0.6 * g;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// 3D PCA: the whole shell, each chunk a solid (outer and inner faces and four sides),
+// drawn translucent, farthest faces first. Only lit chunks show.
+function drawSphere(target, project, glow, inner) {
+  const outer = inner + THICKNESS;
+  const { ctx } = target;
+  const mid = target.canvas.clientWidth / 2;
+  const radius = mid - 12;
+  const at = (r, lon, lat) => {
+    const c = Math.cos(lat);
+    const [x, y, b] = project([r * c * Math.cos(lon), r * c * Math.sin(lon), r * Math.sin(lat)]);
+    return [mid + x * radius, mid - y * radius, b];
   };
-  drawTrace(overlay, point, start, end, project);
+  // n + 1 points from one (radius, longitude, latitude) to another.
+  const edge = (from, to, n) =>
+    Array.from({ length: n + 1 }, (_, k) => at(...from.map((v, j) => v + ((to[j] - v) * k) / n)));
+  const faces = [];
+  BANDS.forEach((band, b) => {
+    const lat0 = band.from + CHUNK_GAP;
+    const lat1 = band.to - CHUNK_GAP;
+    for (let s = 0; s < SECTORS; s++) {
+      const g = glow(chunkIndex(s, b));
+      const lon0 = (s / SECTORS) * TAU + CHUNK_GAP;
+      const lon1 = ((s + 1) / SECTORS) * TAU - CHUNK_GAP;
+      const N = 6; // steps along a longitude edge
+      const M = 4; // along a latitude edge
+      for (const [r, shade] of [[outer, 1], [inner, 0.55]]) {
+        faces.push({ g, shade, points: [
+          ...edge([r, lon0, lat0], [r, lon1, lat0], N),
+          ...edge([r, lon1, lat0], [r, lon1, lat1], M),
+          ...edge([r, lon1, lat1], [r, lon0, lat1], N),
+          ...edge([r, lon0, lat1], [r, lon0, lat0], M),
+        ] });
+      }
+      for (const lat of [lat0, lat1]) {
+        faces.push({ g, shade: 0.75, points: [
+          ...edge([outer, lon0, lat], [outer, lon1, lat], N),
+          ...edge([inner, lon1, lat], [inner, lon0, lat], N),
+        ] });
+      }
+      for (const lon of [lon0, lon1]) {
+        faces.push({ g, shade: 0.75, points: [
+          ...edge([outer, lon, lat0], [outer, lon, lat1], M),
+          ...edge([inner, lon, lat1], [inner, lon, lat0], M),
+        ] });
+      }
+    }
+  });
+  for (const f of faces) f.near = f.points.reduce((sum, p) => sum + p[2], 0) / f.points.length;
+  faces.sort((a, b) => a.near - b.near);
+
+  ctx.save();
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#fff';
+  ctx.shadowColor = '#fff';
+  ctx.lineWidth = 0.75;
+  ctx.lineJoin = 'round';
+  for (const { g, shade, near, points } of faces) {
+    // The shell is invisible at rest; a struck chunk shows as a solid only while it's lit.
+    if (g < 0.02) continue;
+    ctx.beginPath();
+    ctx.moveTo(points[0][0], points[0][1]);
+    for (let k = 1; k < points.length; k++) ctx.lineTo(points[k][0], points[k][1]);
+    ctx.closePath();
+    ctx.shadowBlur = 20 * g;
+    ctx.globalAlpha = 0.7 * g * shade * near;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 0.5 * g * near * near;
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 // Eigen-decomposition of a symmetric n x n matrix (row-major) by cyclic Jacobi rotations.
@@ -673,19 +909,32 @@ function draw() {
   const view = viewSelect.value;
   const project = view === '2d' ? flat : perspective(orientation(now));
   updatePca(now);
+  const sides = view === 'pca' ? [] : plots.map((p) => sideView(p, view, scale, now));
+  const plucking = Boolean(audio) && soundSelect.value === 'plucks';
+  runPlucks(view, sides, scale, plucking, now);
+  // The struck shell: a ring in 2D, a sphere in 3D.
+  const drawShell = (target, glow) => {
+    if (!plucking) return;
+    const inner = Number(sphereInput.value);
+    if (view === '2d') drawRing(target, glow, inner);
+    else drawSphere(target, project, glow, inner);
+  };
   if (view === 'pca') {
     clear(overlay);
+    drawShell(overlay, (k) => wholePlucker.glowAt(k, now));
     drawWholeHead(scale, trail, project);
   } else if (overlayCheckbox.checked) {
     clear(overlay);
+    drawShell(overlay, (k) => Math.max(...plots.map((p) => p.plucker.glowAt(k, now))));
     overlay.ctx.globalCompositeOperation = 'lighter'; // overlapping light adds up
-    for (const p of plots) drawSide(overlay, p, view, scale, trail, project, now);
+    for (const side of sides) drawSide(overlay, side, trail, project);
     overlay.ctx.globalCompositeOperation = 'source-over';
   } else {
-    for (const p of plots) {
+    plots.forEach((p, s) => {
       clear(p);
-      drawSide(p, p, view, scale, trail, project, now);
-    }
+      drawShell(p, (k) => p.plucker.glowAt(k, now));
+      drawSide(p, sides[s], trail, project);
+    });
   }
   requestAnimationFrame(draw);
 }

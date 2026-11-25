@@ -12,6 +12,11 @@ const ACCEL = uuid('000a');
 export const EEG_CHANNELS = ['TP9', 'AF7', 'AF8', 'TP10'];
 const EEG_CHARACTERISTICS = ['0003', '0004', '0005', '0006'].map(uuid);
 
+// Muse 2 optical heart sensor (PPG): three channels, each in its own characteristic.
+export const PPG_CHANNELS = ['ambient', 'infrared', 'red'];
+const PPG_CHARACTERISTICS = ['000f', '0010', '0011'].map(uuid);
+export const PPG_SAMPLE_RATE = 64;
+
 export const EEG_SAMPLE_RATE = 256;
 export const EEG_SAMPLES_PER_PACKET = 12;
 
@@ -31,6 +36,16 @@ function decodeEeg(view) {
     const b2 = view.getUint8(4 + i);
     samples[j++] = 0.48828125 * (((b0 << 4) | (b1 >> 4)) - 0x800);
     samples[j++] = 0.48828125 * ((((b1 & 0x0f) << 8) | b2) - 0x800);
+  }
+  return samples;
+}
+
+// 18 bytes -> 6 unsigned 24-bit big-endian samples (raw light intensity).
+function decodePpg(view) {
+  const samples = new Float32Array(6);
+  for (let j = 0; j < 6; j++) {
+    const o = 2 + j * 3;
+    samples[j] = (view.getUint8(o) << 16) | (view.getUint8(o + 1) << 8) | view.getUint8(o + 2);
   }
   return samples;
 }
@@ -58,13 +73,18 @@ function decodeTelemetry(view) {
 }
 
 export class Muse {
-  constructor() {
+  // `ppg: true` also streams the heart sensor, where the headband has one (Muse 2); it
+  // switches the headband to the preset that includes it. `hasPpg` says whether it did.
+  constructor({ ppg = false } = {}) {
+    this.wantPpg = ppg;
+    this.hasPpg = false;
     this.device = null;
     this.control = null;
     // Callbacks; assign before connect().
     this.onEeg = (_channel, _sequence, _samples) => {};
     this.onAccel = (_samples) => {};
     this.onGyro = (_samples) => {};
+    this.onPpg = (_channel, _sequence, _samples) => {};
     this.onTelemetry = (_telemetry) => {};
     this.onDisconnect = () => {};
   }
@@ -87,9 +107,23 @@ export class Muse {
         this.onEeg(ch, v.getUint16(0), decodeEeg(v)),
       );
     }
+    this.hasPpg = false;
+    if (this.wantPpg) {
+      try {
+        for (let ch = 0; ch < PPG_CHARACTERISTICS.length; ch++) {
+          await this.#subscribe(service, PPG_CHARACTERISTICS[ch], (v) =>
+            this.onPpg(ch, v.getUint16(0), decodePpg(v)),
+          );
+        }
+        this.hasPpg = true;
+      } catch (err) {
+        console.warn('No PPG on this headband', err);
+      }
+    }
 
     await this.#send('h'); // halt
-    await this.#send('p21'); // preset: 4 EEG channels, no aux
+    // Preset p21: 4 EEG channels, no aux; p50 adds the PPG.
+    await this.#send(this.hasPpg ? 'p50' : 'p21');
     await this.#send('s'); // status
     await this.#send('d'); // start streaming
   }
